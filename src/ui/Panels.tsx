@@ -8,6 +8,7 @@ import {
   calibrateFromGroup,
   calibrateFromObject,
   mergeGroups,
+  removeGroup,
   setObjectGroup,
   setReview,
   splitGroup,
@@ -104,6 +105,14 @@ export function GroupsPanel({ project, stats, commit }: { project: Project; stat
                     {t.split}
                   </button>
                 )}
+                <button
+                  className="btn ghost small danger"
+                  onClick={() => commit((p) => ({ ...p, ...removeGroup(p.objects, p.groups, s.group.id) }))}
+                  title={t.discard_group_hint}
+                  aria-label={`${t.discard_group} ${s.group.label}`}
+                >
+                  {t.discard_group}
+                </button>
               </td>
             </tr>
           ))}

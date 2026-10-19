@@ -9,6 +9,7 @@ import {
   mergeDetections,
   mergeGroups,
   numbering,
+  removeGroup,
   removeObject,
   setObjectGroup,
   splitGroup,
@@ -102,6 +103,24 @@ describe('grouping', () => {
     const g2 = applyGrouping(reassigned, g1.groups, DEFAULT_GROUPING);
     expect(g2.groups.map((g) => g.id).sort()).toEqual([small.id, big.id].sort());
     expect(g2.objects.find((o) => o.id === victim.id)!.groupId).toBe(big.id);
+  });
+
+  it('discards a whole group and keeps it out after re-analysis', () => {
+    const withManual = addManualObject(mixed(), 900, 100, 20, null).objects;
+    const g1 = applyGrouping(withManual, [], DEFAULT_GROUPING);
+    const big = g1.groups[1]!;
+    const d = removeGroup(g1.objects, g1.groups, big.id);
+    const stats = computeStats({ ...d, calibration: null });
+    expect(d.groups.map((g) => g.label)).toEqual(['A']);
+    expect(stats.total).toBe(20);
+    expect(stats.rejected).toBe(10);
+    expect(d.objects.some((o) => o.source === 'manual')).toBe(false);
+    // Re-detecting the same large circles must not resurrect them.
+    const again = mergeDetections(d.objects, [
+      ...Array.from({ length: 20 }, (_, i) => circle(i * 30, 0, 10)),
+      ...Array.from({ length: 10 }, (_, i) => circle(i * 50, 100, 20)),
+    ]);
+    expect(computeStats({ objects: again, groups: d.groups, calibration: null }).total).toBe(20);
   });
 
   it('merges and splits groups', () => {

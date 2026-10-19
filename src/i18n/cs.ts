@@ -89,6 +89,8 @@ export const cs = {
   grouping_sep: 'Min. rozdíl průměrů',
   merge_into: 'Sloučit do…',
   split: 'Rozdělit',
+  discard_group: 'Zahodit',
+  discard_group_hint: 'Odebere všechny objekty této skupiny z počtu. Vrátíte tlačítkem Zpět.',
   regroup: 'Přepočítat skupiny',
   regroup_hint: 'Ruční přiřazení skupin zůstane zachováno.',
   unlock_groups: 'Zrušit ruční přiřazení',

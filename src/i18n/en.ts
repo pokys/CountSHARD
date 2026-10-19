@@ -84,6 +84,8 @@ export const en: typeof cs = {
   grouping_sep: 'Min. diameter difference',
   merge_into: 'Merge into…',
   split: 'Split',
+  discard_group: 'Discard',
+  discard_group_hint: 'Removes every object of this group from the count. Undo brings them back.',
   regroup: 'Recompute groups',
   regroup_hint: 'Manual group assignments are kept.',
   unlock_groups: 'Clear manual assignments',

@@ -186,6 +186,19 @@ export function mergeGroups(objects: CountedObject[], groups: SizeGroup[], fromI
   return { objects: nextObjects, groups: relabel(nextObjects, groups.filter((g) => g.id !== fromId)) };
 }
 
+/**
+ * Discards a whole size group: its automatic detections become `rejected` (so re-analysis
+ * does not bring them back), manually added members are deleted. Undo restores them.
+ */
+export function removeGroup(objects: CountedObject[], groups: SizeGroup[], groupId: string) {
+  const nextObjects = objects.flatMap((o) => {
+    if (o.groupId !== groupId || !isCounted(o)) return [o];
+    if (o.source === 'manual') return [];
+    return [{ ...o, review: 'rejected' as const }];
+  });
+  return { objects: nextObjects, groups: relabel(nextObjects, groups.filter((g) => g.id !== groupId)) };
+}
+
 /** Splits one group into two by size (k-means, k = 2); members become locked to their new group. */
 export function splitGroup(objects: CountedObject[], groups: SizeGroup[], groupId: string) {
   const members = objects.filter((o) => isCounted(o) && o.groupId === groupId);
