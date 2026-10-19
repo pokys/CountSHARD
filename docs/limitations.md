@@ -45,6 +45,12 @@ independent noise; see `testing.md`). Known limits:
   20 % of the diagonal, or any registration with < 40 RANSAC inliers, inlier ratio
   < 15 %, inliers covering < 20 % of the frame or RMS residual > 2.5 px, is refused.
   Larger viewpoint changes (walking around the stack, strong tilt) are out of scope.
+- After alignment, a photo is also refused when fewer than 50 % of its *confident*
+  detections (the better-scoring half) have a counterpart in the reference photo and
+  vice versa. Until 2026-10-20 all detections were used for this check, which wrongly
+  refused correctly aligned real photos whose borderline detections differ from shot
+  to shot (reported by a user: "detekce po zarovnání nesouhlasí"). The refusal message
+  now shows the measured agreement.
 - The homography assumes the end faces lie roughly in one plane. Strongly staggered
   ends or a deep stack seen at an angle violate this and are likely to be refused or
   to fuse less accurately.

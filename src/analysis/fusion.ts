@@ -9,9 +9,11 @@
  *   radius (0.5·r) and a radius-ratio gate. Real end faces do not overlap, so their
  *   centres are ≥ 2r apart and a correct match is unambiguous; greedy gives the same
  *   assignment as Hungarian here at a fraction of the cost.
- * - A view whose mapped detections mostly disagree with what is already known is
- *   refused as well (a wrong-but-plausible homography would otherwise duplicate the
- *   whole stack).
+ * - A view whose *confident* detections mostly find no counterpart in the reference
+ *   (and vice versa) is refused as well: a wrong-but-plausible homography would
+ *   otherwise duplicate the whole stack. Only confident detections are used for this
+ *   test because on real photos borderline ends and weak false hits differ from shot
+ *   to shot even when the alignment is perfect.
  * - Each fused object carries "seen in k of n" (n = photos in which its position is
  *   inside the frame); objects with k < n are flagged for review because the photos
  *   disagree about them (occlusion, a missed detection, or a false positive).
@@ -161,12 +163,29 @@ function match(tracks: Track[], obs: Circle[], o: Required<FusionOptions>): [num
   return pairs;
 }
 
+/** The more confident half of a photo's detections (all of them when there are few). */
+function confident(circles: Circle[]): Circle[] {
+  if (circles.length < 20) return circles;
+  return [...circles].sort((a, b) => b.score - a.score).slice(0, Math.ceil(circles.length / 2));
+}
+
+/** Fraction of `a` that has some circle of `b` within the gate (null when `a` is empty). */
+function supportRate(a: Circle[], b: Circle[], gate: number): number | null {
+  if (!a.length) return null;
+  let hit = 0;
+  for (const c of a) if (b.some((d) => Math.hypot(c.x - d.x, c.y - d.y) < gate * Math.min(c.r, d.r))) hit++;
+  return hit / a.length;
+}
+
 export function fuseDetections(views: FusionView[], opts: FusionOptions = {}): FusionResult {
   const o = { ...DEFAULTS, ...opts };
   const ref = views[0]!;
   const tracks: Track[] = ref.circles.map((c) => newTrack(c, 0));
+  const refConfident = confident(ref.circles);
+  // Object size for the residual check, from confident detections only: many tiny weak
+  // false hits would otherwise shrink it and refuse good alignments.
   const medianR = (() => {
-    const s = ref.circles.map((c) => c.r).sort((a, b) => a - b);
+    const s = refConfident.map((c) => c.r).sort((a, b) => a - b);
     return s.length ? s[Math.floor(s.length / 2)]! : 0;
   })();
 
@@ -213,14 +232,21 @@ export function fuseDetections(views: FusionView[], opts: FusionOptions = {}): F
     });
     const pairs = match(tracks, mapped, o);
 
-    // Agreement in the overlap of this view with what is known.
-    const knownInView = tracks.filter((t) => {
-      const [x, y] = apply3(Hinv, tx(t), ty(t));
-      return inside(x, y, tr(t), v.width, v.height);
-    }).length;
-    const denom = Math.min(mapped.length, knownInView);
-    rep.agreement = denom ? pairs.length / denom : 0;
-    if (denom > 0 && rep.agreement < o.minAgreement) {
+    // Consistency of the alignment: confident detections of each photo should have a
+    // counterpart (confident or not) in the other one, inside their common area.
+    const mappedConfident = confident(v.circles).flatMap((c) => {
+      const [x, y] = apply3(H, c.x, c.y);
+      return inside(x, y, 0, ref.width, ref.height) ? [{ x, y, r: c.r * localScale3(H, c.x, c.y), score: c.score }] : [];
+    });
+    const refConfidentInView = refConfident.filter((c) => {
+      const [x, y] = apply3(Hinv, c.x, c.y);
+      return inside(x, y, c.r, v.width, v.height);
+    });
+    const a = supportRate(mappedConfident, ref.circles, o.gate);
+    const b = supportRate(refConfidentInView, mapped, o.gate);
+    const parts = [a, b].filter((x): x is number => x !== null);
+    rep.agreement = parts.length ? parts.reduce((p, q) => p + q, 0) / parts.length : 0;
+    if (parts.length && rep.agreement < o.minAgreement) {
       rep.status = 'refused-inconsistent';
       rep.reason = 'inconsistent';
       continue;

@@ -10,7 +10,7 @@ import { registerImages } from '../../src/analysis/registration';
 import { type FusionView, fuseDetections } from '../../src/analysis/fusion';
 import { type Mat3, IDENTITY3, apply3, invert3, mul3 } from '../../src/analysis/homography';
 import { loadCv } from '../loadCv';
-import { makeMultiViewScene } from '../synthetic/scene';
+import { makeMultiViewScene, rng } from '../synthetic/scene';
 import { matchCircles } from '../synthetic/metrics';
 import { SCENES } from '../eval/scenes';
 
@@ -171,6 +171,28 @@ describe('fusion logic (no images)', () => {
     expect(f.views[1]!.status).toBe('refused-inconsistent');
     expect(f.status).toBe('refused');
     expect(f.countedTotal).toBe(80);
+  });
+
+  it('accepts a correct registration when borderline detections flicker between photos', () => {
+    // Real photos: confident ends are found in every shot, borderline ones come and go,
+    // and each shot has its own weak false hits. That must not look like a wrong alignment.
+    const R = rng(5);
+    const base = grid().map((c, i) => ({ ...c, score: i % 2 ? 0.6 : 0.95 }));
+    const noise = (n: number): Circle[] => Array.from({ length: n }, () => ({ x: 20 + R.next() * 220, y: 20 + R.next() * 180, r: 4 + R.next() * 4, score: 0.56 }));
+    const ref = [...base, ...noise(60)];
+    const other = [...base.filter((c) => c.score > 0.9 || R.next() < 0.3), ...noise(60)];
+    const f = fuseDetections([view(ref, null), view(other, IDENTITY3)]);
+    expect(f.views[1]!.status).toBe('used');
+    expect(f.status).toBe('fused');
+  });
+
+  it('judges alignment size by confident detections, not by tiny false hits', () => {
+    // Many tiny weak false hits must not shrink the reference size used for the residual check.
+    const R = rng(6);
+    const tiny = Array.from({ length: 150 }, () => ({ x: 20 + R.next() * 220, y: 20 + R.next() * 180, r: 2, score: 0.56 }));
+    const reg = { ...okReg(IDENTITY3), residualPx: 1 };
+    const f = fuseDetections([view([...grid(), ...tiny], null), { width: 260, height: 220, circles: grid(), registration: reg }]);
+    expect(f.views[1]!.status).toBe('used');
   });
 
   it('refuses a view whose registration residual is large relative to the objects', () => {

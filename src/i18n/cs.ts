@@ -169,6 +169,7 @@ export const cs = {
     inconsistent: 'detekce po zarovnání nesouhlasí',
     'no-registration': 'nezarovnáno',
   } as Record<string, string>,
+  ms_agreement: (pct: number) => `shoda ${pct} %, potřeba aspoň 50 %`,
   ms_seen: (k: number, n: number) => `vidět na ${k} z ${n} snímků`,
   ms_candidate: 'Nejistý kandidát – nezapočítán',
   ms_count_it: 'Započítat',

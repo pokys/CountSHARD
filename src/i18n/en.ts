@@ -161,6 +161,7 @@ export const en: typeof cs = {
     inconsistent: 'detections disagree after alignment',
     'no-registration': 'not aligned',
   } as Record<string, string>,
+  ms_agreement: (pct: number) => `agreement ${pct} %, at least 50 % needed`,
   ms_seen: (k: number, n: number) => `seen in ${k} of ${n} photos`,
   ms_candidate: 'Uncertain candidate – not counted',
   ms_count_it: 'Count it',

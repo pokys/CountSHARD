@@ -434,7 +434,10 @@ export function MultiShotPanel({
                   ? t.ms_status_ref(p.detections)
                   : p.status === 'used'
                     ? t.ms_status_used(Math.round((p.agreement ?? 0) * 100), p.inliers, fmt(p.residualPx, 1))
-                    : t.ms_status_refused(t.ms_reason[p.reason ?? ''] ?? p.reason ?? '')}
+                    : t.ms_status_refused(
+                        (t.ms_reason[p.reason ?? ''] ?? p.reason ?? '') +
+                          (p.reason === 'inconsistent' && p.agreement !== null ? ` (${t.ms_agreement(Math.round(p.agreement * 100))})` : ''),
+                      )}
               </li>
             ))}
           </ol>
