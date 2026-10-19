@@ -11,6 +11,7 @@ import {
   applyGrouping,
   computeStats,
   mergeDetections,
+  newId,
   numbering,
   removeObject,
   setObjectGroup,
@@ -20,6 +21,14 @@ import {
 import type { Session } from './App';
 import { Viewer, type Tool, type ViewerHandle } from './Viewer';
 import { CalibrationPanel, ExportPanel, type ExtraPhoto, GroupsPanel, MultiShotPanel, ResultPanel, SelectedPanel, SettingsPanel } from './Panels';
+import { AiPanel, AiResultPanel, type PendingRegion } from './AiPanels';
+import { type AiStatus, aiClient } from '../ai/client';
+import { AI_MODEL_ID, AiDownloadError, ORT_VERSION, deleteAi } from '../ai/modelStore';
+import { planTiles } from '../ai/tiling';
+import { GRID_CELL } from '../ai/runner';
+import { addCorrection, addExemplar, decodeDensity, emptyAiState, encodeDensity, normalizeRect, roundEstimate, sumInRect, summarize } from '../ai/estimate';
+import { heatCanvas } from '../io/export';
+import type { AiOverlay } from '../io/draw';
 
 interface Props {
   session: Session;
@@ -31,15 +40,26 @@ interface Props {
 export type Commit = (fn: (p: Project) => Project, coalesce?: boolean) => void;
 
 interface Progress {
-  phase: 'engine' | 'detect' | 'fuse';
+  phase: 'engine' | 'detect' | 'fuse' | 'ai-load' | 'ai-run';
   fraction: number;
+}
+
+/** Resizes the photo to the model scale chosen by the tile plan. */
+function scaledPixels(canvas: HTMLCanvasElement, w: number, h: number): ImageData {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(canvas, 0, 0, w, h);
+  return ctx.getImageData(0, 0, w, h);
 }
 
 export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Props) {
   const { t, fmt } = useI18n();
   const [hist, setHist] = useState<History<Project>>(() => initHistory(session.project));
   const project = hist.present;
-  const [tool, setTool] = useState<Tool>('edit');
+  const [tool, setTool] = useState<Tool>(session.project.mode === 'ai' ? 'pan' : 'edit');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showOverlay, setShowOverlay] = useState(true);
   const [showNumbers, setShowNumbers] = useState(true);
@@ -242,6 +262,140 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
     }
   }, [session.autoAnalyze, runAnalysis]);
 
+  // --- Mode B (generic objects, AI density estimate) ---------------------------
+  const mode = project.mode ?? 'circles';
+  const [aiStatus, setAiStatus] = useState<AiStatus>(aiClient.status);
+  useEffect(() => aiClient.subscribe(setAiStatus), []);
+  useEffect(() => void aiClient.refresh(), []);
+  const [aiDownloadError, setAiDownloadError] = useState<string | null>(null);
+  const [pendingRegion, setPendingRegion] = useState<PendingRegion | null>(null);
+  const [regionError, setRegionError] = useState<string | null>(null);
+  const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
+  const aiSummary = useMemo(() => (project.ai ? summarize(project.ai) : null), [project.ai]);
+  const aiResult = project.ai?.result ?? null;
+  const heat = useMemo(() => (aiResult ? heatCanvas(aiResult) : null), [aiResult]);
+  const [showHeat, setShowHeat] = useState(true);
+
+  const setMode = (m: 'circles' | 'ai') => {
+    if (m === mode) return;
+    if (progress) return;
+    commit((p) => ({ ...p, mode: m, ai: p.ai ?? (m === 'ai' ? emptyAiState() : p.ai) }));
+    setTool(m === 'ai' ? ((project.ai?.exemplars.length ?? 0) > 0 ? 'pan' : 'exemplar') : 'edit');
+    setPendingRegion(null);
+    setSelectedId(null);
+  };
+
+  const downloadModel = useCallback(async () => {
+    setAiDownloadError(null);
+    try {
+      await aiClient.download();
+    } catch (e) {
+      const code = e instanceof AiDownloadError ? e.code : 'http';
+      setAiDownloadError(t.ai_download_err(t.ai_download_reason[code] ?? code));
+    }
+  }, [t]);
+
+  const deleteModel = useCallback(async () => {
+    aiClient.cancel();
+    await deleteAi();
+    await aiClient.refresh();
+  }, []);
+
+  const runAi = useCallback(async () => {
+    const ai = hist.present.ai;
+    if (!ai || !ai.exemplars.length) {
+      setNotice(t.ai_need_exemplar);
+      return;
+    }
+    onError(null);
+    setNotice(null);
+    setPendingRegion(null);
+    setProgress({ phase: 'ai-load', fraction: 0 });
+    try {
+      await aiClient.load();
+    } catch {
+      setProgress(null);
+      onError(t.ai_err_load);
+      return;
+    }
+    try {
+      setProgress({ phase: 'ai-run', fraction: 0 });
+      const exemplars = ai.exemplars;
+      const plan = planTiles(session.canvas.width, session.canvas.height, exemplars);
+      const scaled = scaledPixels(session.canvas, plan.width, plan.height);
+      const out = await aiClient.estimate(scaled, plan, (f) => setProgress({ phase: 'ai-run', fraction: f }));
+      commit((p) => ({
+        ...p,
+        ai: {
+          ...(p.ai ?? emptyAiState()),
+          result: {
+            kind: 'density-estimate',
+            model: AI_MODEL_ID,
+            engine: `onnxruntime-web ${ORT_VERSION} · ${out.backend === 'webgpu' ? 'WebGPU' : 'WASM'}`,
+            cellPx: GRID_CELL / plan.scale,
+            gridW: out.gridW,
+            gridH: out.gridH,
+            density: encodeDensity(out.grid),
+            rawTotal: out.total,
+            tiles: plan.tiles.length,
+            scale: plan.scale,
+            limitedByTiles: plan.limitedByTiles,
+            exemplarsUsed: plan.exemplarsUsed.map((i) => exemplars[i]!),
+            inputExemplarIds: exemplars.map((e) => e.id),
+            durationMs: out.durationMs,
+            at: new Date().toISOString(),
+          },
+        },
+      }));
+      setTool('pan');
+    } catch (e) {
+      if (e instanceof CancelledError) setNotice(t.cancelled);
+      else onError(t.ai_err_run(e instanceof Error ? e.message : String(e)));
+    } finally {
+      setProgress(null);
+    }
+  }, [hist.present.ai, session.canvas, commit, onError, t]);
+
+  const onDrawRect = (kind: 'exemplar' | 'region', x1: number, y1: number, x2: number, y2: number) => {
+    const r = normalizeRect(x1, y1, x2, y2, project.image.width, project.image.height);
+    if (r.w < 4 || r.h < 4) return;
+    if (kind === 'exemplar') {
+      commit((p) => ({ ...p, ai: addExemplar(p.ai ?? emptyAiState(), { id: newId('e'), ...r }) }));
+      return;
+    }
+    if (!aiResult) return;
+    setRegionError(null);
+    setPendingRegion({ ...r, model: sumInRect(aiResult, decodeDensity(aiResult.density), r) });
+  };
+
+  const finishRegion = (count: number | null) => {
+    const r = pendingRegion;
+    setPendingRegion(null);
+    if (!r || count === null) return;
+    const res = addCorrection(project.ai ?? emptyAiState(), { id: newId('r'), x: r.x, y: r.y, w: r.w, h: r.h, userCount: count });
+    if (res.error) {
+      setRegionError(res.error === 'overlap' ? t.ai_err_overlap : t.ai_err_small);
+      return;
+    }
+    setRegionError(null);
+    commit((p) => ({ ...p, ai: addCorrection(p.ai ?? emptyAiState(), res.ai.corrections[res.ai.corrections.length - 1]!).ai }));
+  };
+
+  const aiOverlay: AiOverlay | null =
+    mode === 'ai'
+      ? {
+          heat: showHeat ? heat : null,
+          heatWidth: aiResult ? aiResult.gridW * aiResult.cellPx : 0,
+          heatHeight: aiResult ? aiResult.gridH * aiResult.cellPx : 0,
+          exemplars: project.ai?.exemplars ?? [],
+          regions: [
+            ...(project.ai?.corrections ?? []).map((c, i) => ({ ...c, label: t.ai_region_label(c.userCount, fmt(aiSummary?.regions[i]?.model ?? 0, 1)) })),
+            ...(pendingRegion ? [{ id: 'pending', x: pendingRegion.x, y: pendingRegion.y, w: pendingRegion.w, h: pendingRegion.h, label: '?' }] : []),
+          ],
+          selectedRegionId,
+        }
+      : null;
+
   const stats = useMemo(() => computeStats(project), [project]);
   const numbers = useMemo(() => numbering(project.objects), [project.objects]);
   const selected = project.objects.find((o) => o.id === selectedId && isSelectable(o)) ?? null;
@@ -318,15 +472,44 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
   return (
     <main className="workspace">
       <section className="stage" style={{ ["--img-ratio" as string]: String(session.canvas.height / session.canvas.width) }}>
+        <div className="modebar seg" role="radiogroup" aria-label={t.mode_label}>
+          <button className={mode === 'circles' ? 'on' : ''} onClick={() => setMode('circles')} role="radio" aria-checked={mode === 'circles'} disabled={!!progress} data-testid="mode-circles">
+            {t.mode_circles}
+          </button>
+          <button className={mode === 'ai' ? 'on' : ''} onClick={() => setMode('ai')} role="radio" aria-checked={mode === 'ai'} disabled={!!progress} data-testid="mode-ai">
+            {t.mode_ai}
+          </button>
+        </div>
         <div className="toolbar" role="toolbar">
-          <div className="seg" role="radiogroup">
-            <button className={tool === 'edit' ? 'on' : ''} onClick={() => setTool('edit')} role="radio" aria-checked={tool === 'edit'}>
-              {t.tool_edit}
-            </button>
-            <button className={tool === 'select' ? 'on' : ''} onClick={() => setTool('select')} role="radio" aria-checked={tool === 'select'}>
-              {t.tool_select}
-            </button>
-          </div>
+          {mode === 'circles' ? (
+            <div className="seg" role="radiogroup">
+              <button className={tool === 'edit' ? 'on' : ''} onClick={() => setTool('edit')} role="radio" aria-checked={tool === 'edit'}>
+                {t.tool_edit}
+              </button>
+              <button className={tool === 'select' ? 'on' : ''} onClick={() => setTool('select')} role="radio" aria-checked={tool === 'select'}>
+                {t.tool_select}
+              </button>
+            </div>
+          ) : (
+            <div className="seg" role="radiogroup">
+              <button className={tool === 'exemplar' ? 'on' : ''} onClick={() => setTool('exemplar')} role="radio" aria-checked={tool === 'exemplar'} data-testid="tool-exemplar">
+                {t.ai_tool_exemplar}
+              </button>
+              <button
+                className={tool === 'region' ? 'on' : ''}
+                onClick={() => setTool('region')}
+                role="radio"
+                aria-checked={tool === 'region'}
+                disabled={!aiResult}
+                data-testid="tool-region"
+              >
+                {t.ai_tool_region}
+              </button>
+              <button className={tool === 'pan' ? 'on' : ''} onClick={() => setTool('pan')} role="radio" aria-checked={tool === 'pan'}>
+                {t.ai_tool_pan}
+              </button>
+            </div>
+          )}
           <div className="row">
             <button className="icon" onClick={() => setHist(undo)} disabled={!hist.past.length} title={t.undo} aria-label={t.undo}>
               ↶
@@ -356,14 +539,27 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
           tool={tool}
           showOverlay={showOverlay && !comparing}
           showRejected={showRejected}
+          ai={aiOverlay}
+          onDrawRect={onDrawRect}
+          onSelectRegion={setSelectedRegionId}
           {...handlers}
         />
         {progress && (
           <div className="progress-overlay" role="status" aria-live="polite">
             <div className="progress-card">
-              <p>{progress.phase === 'engine' ? t.loading_engine : progress.phase === 'fuse' ? t.ms_analyzing : t.analyzing}</p>
-              <progress value={progress.phase === 'engine' ? undefined : progress.fraction} max={1} />
-              <button className="btn small" onClick={() => analysisClient.cancel()}>
+              <p>
+                {progress.phase === 'engine'
+                  ? t.loading_engine
+                  : progress.phase === 'fuse'
+                    ? t.ms_analyzing
+                    : progress.phase === 'ai-load'
+                      ? t.ai_loading_model
+                      : progress.phase === 'ai-run'
+                        ? t.ai_estimating
+                        : t.analyzing}
+              </p>
+              <progress value={progress.phase === 'engine' || progress.phase === 'ai-load' ? undefined : progress.fraction} max={1} />
+              <button className="btn small" onClick={() => (progress.phase.startsWith('ai') ? aiClient.cancel() : analysisClient.cancel())}>
                 {t.cancel}
               </button>
             </div>
@@ -401,7 +597,7 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
             </button>
           </div>
         )}
-        <div className="sensbar">
+        {mode === 'circles' && <div className="sensbar">
           <label htmlFor="sens-quick">{t.sensitivity}</label>
           <span className="tiny muted-dark">{t.sens_less}</span>
           <input
@@ -419,7 +615,18 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
           <span id="sens-quick-hint" hidden>
             {t.sensitivity_hint} {t.rerun_hint}
           </span>
-        </div>
+        </div>}
+        {mode === 'ai' ? (
+          <div className="quickbar">
+            <button className="qb-total" onClick={() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} aria-label={t.ai_estimate_label}>
+              <span className="estimate-tag">{t.ai_estimate_label}</span>{' '}
+              <span className="qb-num" data-testid="quick-estimate">{aiSummary ? t.ai_estimate(roundEstimate(aiSummary.corrected)) : '–'}</span> {t.pcs}
+            </button>
+            <button className="btn small primary" disabled={!!progress || !aiStatus.downloaded || !(project.ai?.exemplars.length)} onClick={runAi} data-testid="quick-ai-run">
+              {aiResult ? t.ai_rerun : t.ai_run}
+            </button>
+          </div>
+        ) : (
         <div className="quickbar">
           <button className="qb-total" onClick={() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} aria-label={t.qb_total}>
             <span className="qb-num" data-testid="quick-total">{stats.total}</span> {t.pcs}
@@ -452,18 +659,37 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
             }}
           />
         </div>
+        )}
         <div className="toolbar bottom">
-          <span className="hint">{tool === 'edit' ? t.tool_edit_hint : t.tool_select_hint}</span>
+          <span className="hint">
+            {tool === 'edit'
+              ? t.tool_edit_hint
+              : tool === 'select'
+                ? t.tool_select_hint
+                : tool === 'exemplar'
+                  ? t.ai_tool_exemplar_hint
+                  : tool === 'region'
+                    ? t.ai_tool_region_hint
+                    : t.ai_tool_pan_hint}
+          </span>
           <div className="row">
             <label className="toggle">
               <input type="checkbox" checked={showOverlay} onChange={(e) => setShowOverlay(e.target.checked)} /> {t.overlay}
             </label>
-            <label className="toggle">
-              <input type="checkbox" checked={showNumbers} onChange={(e) => setShowNumbers(e.target.checked)} /> {t.numbers}
-            </label>
-            <label className="toggle">
-              <input type="checkbox" checked={showRejected} onChange={(e) => setShowRejected(e.target.checked)} /> {t.show_rejected}
-            </label>
+            {mode === 'ai' ? (
+              <label className="toggle">
+                <input type="checkbox" checked={showHeat} onChange={(e) => setShowHeat(e.target.checked)} /> {t.ai_heat}
+              </label>
+            ) : (
+              <>
+                <label className="toggle">
+                  <input type="checkbox" checked={showNumbers} onChange={(e) => setShowNumbers(e.target.checked)} /> {t.numbers}
+                </label>
+                <label className="toggle">
+                  <input type="checkbox" checked={showRejected} onChange={(e) => setShowRejected(e.target.checked)} /> {t.show_rejected}
+                </label>
+              </>
+            )}
             <button
               className="btn ghost small"
               onPointerDown={() => setComparing(true)}
@@ -479,6 +705,30 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
 
       <aside className="side">
         {notice && <div className="banner info">{notice}</div>}
+        {mode === 'ai' ? (
+          <>
+            <div ref={resultRef}>
+              <AiResultPanel project={project} summary={aiSummary} />
+            </div>
+            <AiPanel
+              project={project}
+              commit={commit}
+              status={aiStatus}
+              downloadError={aiDownloadError}
+              running={!!progress}
+              onDownload={() => void downloadModel()}
+              onDeleteModel={() => void deleteModel()}
+              onRun={() => void runAi()}
+              summary={aiSummary}
+              pending={pendingRegion}
+              onPendingDone={finishRegion}
+              regionError={regionError}
+              selectedRegionId={selectedRegionId}
+              onSelectRegion={setSelectedRegionId}
+            />
+          </>
+        ) : (
+        <>
         <div ref={resultRef}>
           <ResultPanel stats={stats} onConfirmAll={confirmAll} />
         </div>
@@ -502,6 +752,8 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
           onRemove={(i) => setExtraPhotos((list) => list.filter((_, j) => j !== i))}
           onRun={runFusion}
         />
+        </>
+        )}
         <ExportPanel project={project} canvas={session.canvas} commit={commit} />
         <button className="btn ghost" onClick={onNewPhoto}>
           {t.new_photo}

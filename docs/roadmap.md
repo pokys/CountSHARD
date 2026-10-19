@@ -23,6 +23,16 @@ Status as of 2026-10-19.
   truth with zero duplicates, and a photo of a different scene is refused
   (`tests/unit/multishot.test.ts`; results in `testing.md`). Real photos not tested.
 
+- **Phase 4 — generic AI counting (Mode B):** LOCA few-shot (owner accepted the
+  non-commercial weight licence) exported to two ONNX graphs, weight-only int8 (34.9 MB,
+  count within 1.9 % of PyTorch); onnxruntime-web 1.30 in a worker, WebGPU with WASM
+  fallback; lazy download with progress into Cache Storage, offline afterwards; aspect-
+  preserving scale + 512 px tiling instead of squashing; mode switch, 1–3 exemplar boxes,
+  heat map + total labelled as an estimate, region corrections, PNG/CSV/JSON marked as an
+  estimate. Evaluated on synthetic scenes, a 20-image FSC-147 sample and 2 × 2 mosaics
+  (`testing.md`): 7–9 % mean abs. error on the dataset images; the tiling was *not* more
+  accurate than LOCA's squash-to-512 overall (it over-counts when it upscales).
+
 ## Next
 
 1. **Real-photo evaluation set** (highest value). 20–50 photos of real bundles,
@@ -34,15 +44,11 @@ Status as of 2026-10-19.
    2–3 shots each); keep extra photos with the project (currently memory only);
    re-run fusion automatically when the sensitivity changes (today a single-photo
    re-analysis replaces the fused result).
-4. **Phase 4 — Generic AI counting** (blocked on a licence decision)
-   - LOCA weights inherit a non-commercial SwAV backbone (CC BY-NC 4.0) — needs an
-     owner decision or a model with clear weights licensing;
-   - prefer a detection-capable model (individually correctable points/boxes) over a
-     pure density map; if only density is available, present it as an *estimate*
-     with a heat map and a separate correction workflow (count adjustment by region),
-     never as individually identified objects;
-   - ONNX export + int8 quantisation, ORT-Web with WebGPU where available, WASM
-     fallback, lazy download with progress, cached for offline use.
+4. **Mode B follow-ups:** evaluate on real photos of the target objects (same set as item 1);
+   reduce the few-percent over-count when tiles upscale (validate the exemplar band on the
+   FSC-147 *validation* split, not the test sample); profile WebGPU (≈ 3 s/tile on an Intel
+   iGPU suggests CPU fallbacks) and consider fp16; a detection-capable model with clear
+   weights licensing (individually correctable points) would replace the estimate workflow.
 5. **Quality:** memory profiling on iOS/Android, tiling for > 2400 px analysis,
    blur/quality warning before analysis, guided photography tips after poor results.
 

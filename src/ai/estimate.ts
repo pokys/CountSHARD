@@ -1,0 +1,161 @@
+/**
+ * Mode B result arithmetic: density storage, region sums and user corrections. Pure, no DOM.
+ *
+ * The model returns a density map whose sum is an ESTIMATE of the number of objects. The user
+ * can correct it region by region: inside a corrected region the user's count replaces the
+ * model's density sum. Regions may not overlap, so every pixel is counted by exactly one source.
+ */
+import type { AiBox, AiDensityResult, AiRegionCorrection, AiState } from '../model/types';
+
+export const MAX_EXEMPLARS = 3;
+
+// --- storage ---------------------------------------------------------------
+
+export function encodeDensity(data: Float32Array): string {
+  const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+const decoded = new Map<string, Float32Array>();
+
+/** Decodes (and memoises the last few) base64 density grids. */
+export function decodeDensity(b64: string): Float32Array {
+  const hit = decoded.get(b64);
+  if (hit) return hit;
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const out = new Float32Array(bytes.buffer);
+  decoded.set(b64, out);
+  if (decoded.size > 4) decoded.delete(decoded.keys().next().value!);
+  return out;
+}
+
+// --- geometry --------------------------------------------------------------
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Normalises a rectangle drawn in any direction and clips it to the image. */
+export function normalizeRect(x1: number, y1: number, x2: number, y2: number, imgW: number, imgH: number): Rect {
+  const a = Math.max(0, Math.min(x1, x2));
+  const b = Math.max(0, Math.min(y1, y2));
+  const c = Math.min(imgW, Math.max(x1, x2));
+  const d = Math.min(imgH, Math.max(y1, y2));
+  return { x: a, y: b, w: Math.max(0, c - a), h: Math.max(0, d - b) };
+}
+
+export function rectsOverlap(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+/**
+ * Density summed over a rectangle in project pixels. Cells partly inside contribute in
+ * proportion to the covered area (density assumed uniform within a cell).
+ */
+export function sumInRect(res: Pick<AiDensityResult, 'cellPx' | 'gridW' | 'gridH'>, data: ArrayLike<number>, r: Rect): number {
+  const c = res.cellPx;
+  const cx0 = Math.max(0, Math.floor(r.x / c));
+  const cy0 = Math.max(0, Math.floor(r.y / c));
+  const cx1 = Math.min(res.gridW, Math.ceil((r.x + r.w) / c));
+  const cy1 = Math.min(res.gridH, Math.ceil((r.y + r.h) / c));
+  let s = 0;
+  for (let cy = cy0; cy < cy1; cy++) {
+    const fy = Math.max(0, Math.min((cy + 1) * c, r.y + r.h) - Math.max(cy * c, r.y)) / c;
+    if (fy <= 0) continue;
+    for (let cx = cx0; cx < cx1; cx++) {
+      const fx = Math.max(0, Math.min((cx + 1) * c, r.x + r.w) - Math.max(cx * c, r.x)) / c;
+      if (fx > 0) s += data[cy * res.gridW + cx]! * fx * fy;
+    }
+  }
+  return s;
+}
+
+// --- corrections -----------------------------------------------------------
+
+export type CorrectionError = 'overlap' | 'too-small' | 'bad-count';
+
+/** Smallest correction region side (project px). */
+export const MIN_REGION_PX = 8;
+
+export function validateCorrection(existing: AiRegionCorrection[], c: Omit<AiRegionCorrection, 'id'> & { id?: string }): CorrectionError | null {
+  if (c.w < MIN_REGION_PX || c.h < MIN_REGION_PX) return 'too-small';
+  if (!Number.isInteger(c.userCount) || c.userCount < 0) return 'bad-count';
+  if (existing.some((e) => e.id !== c.id && rectsOverlap(e, c))) return 'overlap';
+  return null;
+}
+
+export interface RegionSummary {
+  id: string;
+  /** Model's density sum inside the region. */
+  model: number;
+  user: number;
+}
+
+export interface EstimateSummary {
+  /** Model estimate for the whole photo. */
+  raw: number;
+  /** Raw estimate with every corrected region's model sum replaced by the user's count. */
+  corrected: number;
+  /** Part of `corrected` that comes from user counts. */
+  userCounted: number;
+  regions: RegionSummary[];
+}
+
+export function summarize(ai: AiState): EstimateSummary | null {
+  const res = ai.result;
+  if (!res) return null;
+  const data = decodeDensity(res.density);
+  const regions = ai.corrections.map((c) => ({ id: c.id, model: sumInRect(res, data, c), user: c.userCount }));
+  const replaced = regions.reduce((a, r) => a + r.model, 0);
+  const userCounted = regions.reduce((a, r) => a + r.user, 0);
+  return { raw: res.rawTotal, corrected: Math.max(0, res.rawTotal - replaced + userCounted), userCounted, regions };
+}
+
+/** Display rounding of an estimate (never shown with false precision). */
+export function roundEstimate(v: number): number {
+  return Math.max(0, Math.round(v));
+}
+
+// --- state operations (pure) -----------------------------------------------
+
+export function emptyAiState(): AiState {
+  return { exemplars: [], result: null, corrections: [] };
+}
+
+export function addExemplar(ai: AiState, box: AiBox): AiState {
+  return { ...ai, exemplars: [...ai.exemplars, box].slice(-MAX_EXEMPLARS) };
+}
+
+export function removeExemplar(ai: AiState, id: string): AiState {
+  return { ...ai, exemplars: ai.exemplars.filter((e) => e.id !== id) };
+}
+
+export function addCorrection(ai: AiState, c: AiRegionCorrection): { ai: AiState; error: CorrectionError | null } {
+  const error = validateCorrection(ai.corrections, c);
+  return error ? { ai, error } : { ai: { ...ai, corrections: [...ai.corrections, c] }, error: null };
+}
+
+export function setCorrectionCount(ai: AiState, id: string, userCount: number): AiState {
+  if (!Number.isInteger(userCount) || userCount < 0) return ai;
+  return { ...ai, corrections: ai.corrections.map((c) => (c.id === id ? { ...c, userCount } : c)) };
+}
+
+export function removeCorrection(ai: AiState, id: string): AiState {
+  return { ...ai, corrections: ai.corrections.filter((c) => c.id !== id) };
+}
+
+/** Exemplars changed since the result was computed → the result is stale. */
+export function resultIsStale(ai: AiState): boolean {
+  const res = ai.result;
+  if (!res) return false;
+  const now = ai.exemplars.map((e) => e.id).sort().join(',');
+  if (now !== [...res.inputExemplarIds].sort().join(',')) return true;
+  return !res.exemplarsUsed.every((u) => ai.exemplars.some((e) => e.id === u.id && e.x === u.x && e.y === u.y && e.w === u.w && e.h === u.h));
+}

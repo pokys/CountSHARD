@@ -7,14 +7,25 @@ src/
     clustering.ts  size classes (KDE modes / 1-D k-means)
     client.ts      main-thread client of the worker (progress, cancel, warm-up)
     cv.ts          OpenCV typing shim + Mat lifetime helper
-  workers/       analysis.worker.ts (owns OpenCV.js), protocol.ts
+  ai/            Mode B (generic objects, LOCA density estimate) — pure except client/modelStore
+    tiling.ts      aspect-preserving scale from exemplar size, 512 px tiles with ownership
+    tensor.ts      RGBA → normalised NCHW (letterbox), resize, stitching into a density grid
+    runner.ts      runs a tile plan on an abstract backend (worker: ORT-Web; eval: ORT-Web/Node)
+    estimate.ts    density storage, region sums, user corrections, pure state operations
+    heatmap.ts     density → heat-map RGBA
+    modelStore.ts  lazy download of model + ORT WASM into Cache Storage (progress, SHA-256)
+    client.ts      main-thread client of the AI worker + "downloaded / ready" status
+  workers/       analysis.worker.ts (owns OpenCV.js), protocol.ts,
+                 ai.worker.ts (owns onnxruntime-web + the two LOCA graphs), aiProtocol.ts
   model/         types.ts — Project, CountedObject, SizeGroup, params
   state/         project.ts (pure operations), history.ts (undo/redo)
   io/            image.ts (decode/normalise), draw.ts (shared renderer),
                  export.ts (PNG/download), serialize.ts (CSV/JSON), db.ts (IndexedDB)
   pwa/           register.ts (service worker), offline.ts (readiness checks)
+public/models/loca/  loca-features-w8.onnx, loca-head-w8.onnx (served, not precached)
+scripts/loca/        how the ONNX files were exported, quantised and verified
   i18n/          cs.ts (primary), en.ts, provider
-  ui/            App, StartScreen, Workspace, Viewer, Panels, OfflineBadge, styles
+  ui/            App, StartScreen, Workspace, Viewer, Panels, AiPanels, OfflineBadge, styles
   demo/          synthetic demo photo
 tests/
   synthetic/     scene generator, metrics, PNG writer
@@ -40,6 +51,24 @@ tests/
 7. **Export**: PNG (`renderAnnotatedPng`, same renderer as the viewer), CSV, JSON
    (project + embedded image, re-importable and fully editable).
 
+## Mode B data flow (generic objects, AI estimate)
+
+1. **Mode switch** (`Project.mode`: `circles` | `ai`) in the workspace. The two modes share
+   the photo, undo history, persistence and export panel; their results never mix.
+2. **Download on demand** (`ai/modelStore.ts`): model graphs (34.9 MB) and the ORT-Web WASM
+   (28.3 MB) are fetched with progress, size- and hash-checked and stored in Cache Storage.
+3. **Exemplars**: the user draws 1–3 boxes (`AiState.exemplars`, project pixels).
+4. **Plan** (`ai/tiling.ts`, main thread): scale from the exemplar size, tiles, exemplar
+   window; the photo is resized to the plan size on a canvas and transferred to the worker.
+5. **Inference** (`ai.worker.ts` → `ai/runner.ts`): `features` for the exemplar window and
+   every tile, `head` per tile with the exemplar features; owned parts of each 512 × 512
+   density map are summed into a grid with 4 × 4 model-pixel cells. WebGPU or WASM.
+6. **Result** (`AiDensityResult`): grid (Float32, base64), raw total, scale, tiles, exemplars
+   used, engine, duration — stored in the project; `AiState.corrections` holds the user's
+   region counts. `summarize()` gives raw and corrected estimates.
+7. **Display/export**: heat map + exemplar boxes + region boxes (`drawAiOverlay`, shared by
+   viewer and PNG), CSV with explicit estimate rows, JSON with `summary.estimate.isEstimate`.
+
 ## Object model
 
 `CountedObject { id, x, y, r, source: auto|manual, review: unreviewed|confirmed|rejected,
@@ -60,14 +89,18 @@ and the app version — so an exported file documents how its numbers were produ
 ## Offline
 
 `vite-plugin-pwa` (`generateSW`) precaches `index.html`, JS/CSS (incl. the 14.5 MB
-worker with embedded OpenCV WASM), icons and the manifest. No runtime network access
-is needed after install. `pwa/offline.ts` verifies each layer separately.
+worker with embedded OpenCV WASM and the 0.4 MB AI worker), icons and the manifest. No
+runtime network access is needed after install for Mode A. Mode B files (`.onnx`, ORT
+`.wasm`) are excluded from the precache by its glob patterns and stored in a separate
+cache (`countshard-ai-v1`) after the user downloads them. `pwa/offline.ts` and
+`ai/client.ts` verify each layer separately.
 
 ## Extension points
 
-- New detectors (e.g. AI) → new worker request type in `workers/protocol.ts`, results
-  merged through the same `mergeDetections` (instance models) or a separate
-  estimate-only result type (density models).
+- New detectors: instance models (individually correctable points/boxes) → results
+  merged through `mergeDetections`; density models → the Mode B estimate type
+  (`AiDensityResult`), as LOCA does now. A different ONNX model only needs new files in
+  `public/models/`, `ai/modelStore.ts` and the backend in `ai.worker.ts`.
 - Multi-shot (implemented, `analysis/registration.ts`, `analysis/fusion.ts`, worker
   request `fuse`): the project photo is the reference; extra photos are registered
   onto it (ORB + RANSAC homography), detections are fused into ordinary

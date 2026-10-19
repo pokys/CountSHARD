@@ -4,8 +4,8 @@
 
 **1. Is the application feasible?** Yes for the core (classical detection of
 circular ends, corrections, size classes, export, offline PWA) — now implemented and
-measured. Generic AI counting is feasible technically (LOCA runs in ORT-Web, as the
-reference proves) but blocked on weight licensing. Multi-shot with *small* viewpoint
+measured. Generic AI counting (LOCA in ORT-Web) is implemented as Mode B; its weights are
+non-commercial and the owner accepted that risk (see "Mode B" below). Multi-shot with *small* viewpoint
 changes is feasible; arbitrary viewpoints are research-grade.
 
 **2. Straightforward:** import, offline shell, worker-based OpenCV, corrections,
@@ -23,8 +23,8 @@ single reference; multi-shot from substantially different angles; Live Scan.
 - Circles: multi-band Hough candidates + independent edge-support verification
   (details below).
 - Size classes: KDE mode finding in log-radius space (auto) or 1-D k-means (fixed k).
-- Generic AI (planned): detection-capable few-shot counter (GeCo-class) if its
-  weights' licence allows, else LOCA density with an "estimate" workflow.
+- Generic AI (implemented, Mode B): LOCA density with an "estimate" workflow — the
+  weights decision is below; a detection-capable model (GeCo-class) remains preferable.
 - Multi-shot (implemented): homography (ORB/RANSAC on the *whole scene* including the
   bundle outline and surroundings) + one-to-one matching of detections (greedy with a
   0.5·r gate — equivalent to Hungarian for non-overlapping objects) + majority vote;
@@ -33,21 +33,21 @@ single reference; multi-shot from substantially different angles; Live Scan.
 **6. Stack.** The proposed TypeScript + Vite + React + OpenCV.js + Workers + Workbox
 stack is appropriate and was kept. Changes: OpenCV is **bundled** into the worker
 (no CDN at runtime, guaranteed offline after install); no TensorFlow.js; ONNX Runtime
-is deferred until there is a licensable model.
+Web runs Mode B in its own worker, loaded only when AI counting is used.
 
 **7. Reusable open source.** OpenCV.js (Apache-2.0), vite-plugin-pwa/Workbox (MIT),
-ONNX Runtime Web (MIT, later). No suitable ready-made pipe counter library exists;
+ONNX Runtime Web (MIT, Mode B). No suitable ready-made pipe counter library exists;
 the reference site is proprietary.
 
 **8. Order.** MVP + size classes first (they share the detector and are the core
-use case), then multi-shot (small viewpoint changes), then generic AI (blocked on
-licence), Live Scan last or never.
+use case), then multi-shot (small viewpoint changes), then generic AI (Mode B, done after the
+licence decision), Live Scan last or never.
 
 **9. Changes to the specification**
 - Size classes (Mode C) are not a separate mode: every circle detection produces
   diameters, so grouping is always available in the same screen.
-- Mode B (AI) is moved after multi-shot, because the most valuable use case (pipes)
-  does not need it and its model licensing is unresolved.
+- Mode B (AI) was moved after multi-shot, because the most valuable use case (pipes)
+  does not need it and its model licensing needed an owner decision (taken 2026-10-20).
 - "Confidence" is reported as *edge match* (fraction of the rim with a strong radial
   edge) — a heuristic, explicitly not a probability.
 - Calibration from a whole **group's nominal size** was added; it is more robust
@@ -123,3 +123,59 @@ The status chip checks each layer (shell in cache + SW controlling, worker in ca
 engine actually started) rather than inferring readiness from registration.
 `navigator.storage.persist()` is requested after the first saved project. Updates are
 applied only on user confirmation so a running analysis is never interrupted.
+
+## Mode B — generic objects (AI density estimate)
+
+**Licence decision (2026-10-20).** The only candidate with published few-shot weights that
+runs well in a browser is LOCA (ICCV 2023). Its code is MIT, but its weights were trained
+from a SwAV ResNet-50 (CC BY-NC 4.0), so they are treated as non-commercial. The project
+owner explicitly accepted this licence risk and asked for LOCA to be shipped; the notice is
+in `THIRD_PARTY_NOTICES.md`, the UI shows a one-line licence note in the AI panel. Mode A
+does not depend on the weights; replacing the model later only touches `public/models/`,
+`src/ai/modelStore.ts` and the worker.
+
+**Estimate, never objects.** LOCA outputs a density map; its sum is the count. Nothing in
+the map identifies individual objects (peaks merge for touching objects, one object can
+spread over several cells), so the app never draws per-object marks for Mode B. The UI and
+every export label the number "ODHAD / ESTIMATE"; the heat map is drawn with a relative
+colour scale and no numbers. The user corrects the estimate by **regions**: draw a box,
+enter its true count, and that count replaces the model's density sum inside the box
+(`src/ai/estimate.ts`). Regions may not overlap, so each pixel is counted by exactly one
+source and the corrected total is `raw − Σ model(region) + Σ user(region)`.
+
+**Export format.** The model is split into two ONNX graphs (`features`, `head`;
+`scripts/loca/README.md`) so exemplar prototypes are computed once per photo and applied
+to every tile. Weight-only int8 (int8 storage + `DequantizeLinear`, fp32 compute): 34.9 MB,
+runs unchanged on WebGPU and WASM, count within 1.9 % of PyTorch on the verification images.
+Dynamic int8 (ConvInteger) had about twice the error and is not supported by every
+execution provider.
+
+**Aspect ratio and tiling instead of squashing.** LOCA's protocol (and the reference site)
+resizes every photo to 512 × 512. For a phone photo of many small objects that shrinks each
+object to a few pixels and distorts shapes. CountSHARD scales the photo uniformly so that the
+exemplars' size falls into the band LOCA saw in training (p25–p75 of FSC-147 training
+exemplars at the 512 input: 36–92 px; inside the band the photo is just fitted into one
+tile), then covers it with overlapping 512 × 512 tiles (32 px context, ownership split
+halfway through each overlap, letterbox with the ImageNet mean). Tiles are capped at 16
+(≈ inference time); the result says when the cap reduced the scale. The exemplar window is
+the 512 window holding most exemplars; exemplars outside it are reported as unused. Measured
+effect (`testing.md`): **no overall gain over squashing** (mean abs. error 4.6 % vs 2.4 %
+synthetic, 8.7 % vs 10.7 % FSC-147, 7.0 % vs 6.6 % on 2 × 2 mosaics). It helps photos with
+large objects (aspect ratio) and very small dense objects, and over-counts by a few percent
+when it upscales. Kept because squashing makes an arbitrarily large phone photo unusable in
+principle (objects shrink without bound) while tiling keeps the model's input at training
+scale; the band was taken from training statistics, not tuned on the evaluation set, and is
+the first thing to revisit with real photos.
+
+**Post-processing.** Plain density sum (LOCA's own evaluation). The reference site's "sum
+only density above 5 % of the max" was measured as well and was worse on the synthetic set
+(MAE 36.2 vs 23.1 squashed) and equal on FSC-147 (6.9 vs 7.1), so it is not used.
+
+**Runtime.** onnxruntime-web 1.30 (MIT) in its own worker, default bundle (WebGPU via JSEP +
+WASM in one `.wasm`). WebGPU when an adapter exists, otherwise WASM. Multi-threaded WASM
+needs cross-origin isolation, which GitHub Pages cannot provide, so WASM runs single-threaded.
+Model files and the 28 MB WASM are **not** precached by the service worker (≈ 63 MB that only
+AI users need): the AI panel downloads them on request with byte progress, verifies size and
+SHA-256, and keeps them in Cache Storage (`countshard-ai-v1`); the worker reads them from
+there, so Mode B works offline after that one download. The status chip lists "AI model
+downloaded" and "AI ready" (sessions created, with the backend) separately.

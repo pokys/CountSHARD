@@ -111,3 +111,66 @@ export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedO
     }
   }
 }
+
+// --- Mode B (AI density estimate) overlay ----------------------------------
+
+/** Exemplar boxes: cyan, dashed. Correction regions: white. Neither is a group/review colour. */
+export const AI_COLORS = { exemplar: '#22d3ee', region: '#ffffff' } as const;
+
+export interface AiOverlay {
+  /** Heat map image covering gridW·cellPx × gridH·cellPx project pixels from the origin. */
+  heat: CanvasImageSource | null;
+  heatWidth: number;
+  heatHeight: number;
+  exemplars: { id: string; x: number; y: number; w: number; h: number }[];
+  regions: { id: string; x: number; y: number; w: number; h: number; label: string }[];
+  /** Rectangle being drawn. */
+  draft?: { x: number; y: number; w: number; h: number; kind: 'exemplar' | 'region' } | null;
+  selectedRegionId?: string | null;
+}
+
+function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, u: number, color: string) {
+  const fontPx = 13 * u;
+  ctx.font = `700 ${fontPx}px system-ui, -apple-system, Segoe UI, sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  const w = ctx.measureText(text).width + 8 * u;
+  ctx.fillStyle = 'rgba(15,23,42,0.85)';
+  ctx.fillRect(x, y, w, fontPx + 6 * u);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x + 4 * u, y + 3 * u);
+}
+
+/** Draws the heat map, exemplar boxes and correction regions (no per-object marks: it is an estimate). */
+export function drawAiOverlay(ctx: CanvasRenderingContext2D, o: AiOverlay, pxPerUnit: number) {
+  const u = 1 / pxPerUnit;
+  if (o.heat) {
+    const smooth = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(o.heat, 0, 0, o.heatWidth, o.heatHeight);
+    ctx.imageSmoothingEnabled = smooth;
+  }
+  for (const r of o.regions) {
+    ctx.lineWidth = (r.id === o.selectedRegionId ? 3.5 : 2) * u;
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.strokeRect(r.x - u, r.y - u, r.w + 2 * u, r.h + 2 * u);
+    ctx.strokeStyle = AI_COLORS.region;
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+    label(ctx, r.label, r.x + 2 * u, r.y + 2 * u, u, AI_COLORS.region);
+  }
+  o.exemplars.forEach((e, i) => {
+    ctx.lineWidth = 2.5 * u;
+    ctx.setLineDash([6 * u, 4 * u]);
+    ctx.strokeStyle = AI_COLORS.exemplar;
+    ctx.strokeRect(e.x, e.y, e.w, e.h);
+    ctx.setLineDash([]);
+    label(ctx, `${i + 1}`, e.x, Math.max(0, e.y - 20 * u), u, AI_COLORS.exemplar);
+  });
+  if (o.draft && o.draft.w > 0 && o.draft.h > 0) {
+    ctx.lineWidth = 2 * u;
+    ctx.setLineDash([4 * u, 4 * u]);
+    ctx.strokeStyle = o.draft.kind === 'exemplar' ? AI_COLORS.exemplar : AI_COLORS.region;
+    ctx.strokeRect(o.draft.x, o.draft.y, o.draft.w, o.draft.h);
+    ctx.setLineDash([]);
+  }
+}

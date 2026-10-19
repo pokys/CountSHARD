@@ -15,9 +15,10 @@ import {
   unlockAllGroups,
   updateObject,
 } from '../state/project';
-import { blobToDataUrl, downloadBlob, renderAnnotatedPng, safeFilename } from '../io/export';
+import { blobToDataUrl, downloadBlob, renderAiPng, renderAnnotatedPng, safeFilename } from '../io/export';
 import { canvasToBlob } from '../io/image';
-import { toCsv, toProjectFile } from '../io/serialize';
+import { toAiCsv, toCsv, toProjectFile } from '../io/serialize';
+import { roundEstimate, summarize } from '../ai/estimate';
 import type { Commit } from './Workspace';
 
 /** Spread above which a size group is flagged for review (MAD/median). */
@@ -448,14 +449,31 @@ export function MultiShotPanel({
 }
 
 export function ExportPanel({ project, canvas, commit }: { project: Project; canvas: HTMLCanvasElement; commit: Commit }) {
-  const { t, lang } = useI18n();
+  const { t, lang, fmt } = useI18n();
   const fd = useDiameterFormat();
   const [name, setName] = useState(project.name);
   useEffect(() => setName(project.name), [project.name]);
   const base = safeFilename(project.name);
   const date = new Date().toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB');
 
+  const aiMode = project.mode === 'ai';
+  const aiSum = aiMode && project.ai ? summarize(project.ai) : null;
+
   const png = async () => {
+    if (aiMode) {
+      if (!aiSum) return;
+      const blob = await renderAiPng(canvas, project, {
+        title: t.legend_title,
+        total: t.legend_ai_total,
+        corrected: t.legend_ai_corrected,
+        note: t.ai_result_note,
+        footer: t.legend_ai_footer(date),
+        regionLabel: t.ai_region_label,
+        fmt,
+      });
+      downloadBlob(blob, `${base}-${t.ai_qb}-${roundEstimate(aiSum.corrected)}.png`);
+      return;
+    }
     const blob = await renderAnnotatedPng(
       canvas,
       project,
@@ -465,6 +483,15 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
     downloadBlob(blob, `${base}-${project.objects.filter(isCounted).length}.png`);
   };
   const csv = () => {
+    if (aiMode) {
+      const text = toAiCsv(project, {
+        decimal: lang === 'cs' ? ',' : '.',
+        headers: t.csv_ai,
+        rows: t.csv_ai,
+      });
+      downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${base}-${t.ai_qb}.csv`);
+      return;
+    }
     const text = toCsv(project, {
       decimal: lang === 'cs' ? ',' : '.',
       headers: t.csv,
@@ -487,10 +514,10 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
         <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== project.name && commit((p) => ({ ...p, name: name.trim() }))} />
       </label>
       <div className="row wrap">
-        <button className="btn primary" onClick={png} data-testid="export-png">
+        <button className="btn primary" onClick={png} disabled={aiMode && !aiSum} data-testid="export-png">
           {t.export_png}
         </button>
-        <button className="btn" onClick={csv}>
+        <button className="btn" onClick={csv} disabled={aiMode && !aiSum}>
           {t.export_csv}
         </button>
         <button className="btn" onClick={json}>

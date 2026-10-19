@@ -1,9 +1,11 @@
 /**
  * Browser exports: annotated PNG, downloads, data URLs.
  */
-import type { Project } from '../model/types';
+import type { AiDensityResult, Project } from '../model/types';
 import { computeStats, numbering } from '../state/project';
-import { drawAnnotations } from './draw';
+import { decodeDensity, roundEstimate, summarize } from '../ai/estimate';
+import { heatRgba } from '../ai/heatmap';
+import { drawAiOverlay, drawAnnotations } from './draw';
 import { canvasToBlob } from './image';
 
 export interface LegendText {
@@ -59,6 +61,91 @@ export async function renderAnnotatedPng(base: HTMLCanvasElement, p: Project, le
   ctx.fillStyle = '#94a3b8';
   ctx.font = `400 ${13 * unit}px system-ui, sans-serif`;
   ctx.fillText(legend.footer, x0, y);
+  return canvasToBlob(canvas, 'image/png');
+}
+
+/** Heat-map image of a Mode B result (one pixel per density cell). */
+export function heatCanvas(res: AiDensityResult): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = res.gridW;
+  c.height = res.gridH;
+  const rgba = heatRgba(decodeDensity(res.density), res.gridW, res.gridH);
+  c.getContext('2d')!.putImageData(new ImageData(rgba, res.gridW, res.gridH), 0, 0);
+  return c;
+}
+
+export interface AiLegendText {
+  title: string;
+  total: (n: number) => string;
+  corrected: (raw: number, regions: number) => string;
+  note: string;
+  footer: string;
+  regionLabel: (user: number, model: string) => string;
+  fmt: (v: number, digits?: number) => string;
+}
+
+/**
+ * Mode B PNG: photo + heat map + exemplar boxes + corrected regions, and a legend that
+ * states the number is an estimate. No per-object marks are drawn.
+ */
+export async function renderAiPng(base: HTMLCanvasElement, p: Project, legend: AiLegendText): Promise<Blob> {
+  const ai = p.ai!;
+  const res = ai.result!;
+  const sum = summarize(ai)!;
+  const w = base.width;
+  const unit = Math.max(1, w / 1200);
+  const lineH = 26 * unit;
+  const x0 = 16 * unit;
+  const fonts = { title: `700 ${20 * unit}px system-ui, sans-serif`, body: `500 ${16 * unit}px system-ui, sans-serif`, small: `400 ${13 * unit}px system-ui, sans-serif` };
+  const measure = document.createElement('canvas').getContext('2d')!;
+  const wrap = (text: string, font: string) => {
+    measure.font = font;
+    const out: string[] = [];
+    let line = '';
+    for (const word of text.split(' ')) {
+      const next = line ? `${line} ${word}` : word;
+      if (line && measure.measureText(next).width > w - 2 * x0) {
+        out.push(line);
+        line = word;
+      } else line = next;
+    }
+    if (line) out.push(line);
+    return out;
+  };
+  const lines: { text: string; font: string; color: string }[] = [
+    ...wrap(`${legend.title} — ${legend.total(roundEstimate(sum.corrected))}`, fonts.title).map((text) => ({ text, font: fonts.title, color: '#ffffff' })),
+    ...(ai.corrections.length ? wrap(legend.corrected(roundEstimate(sum.raw), ai.corrections.length), fonts.body) : []).map((text) => ({ text, font: fonts.body, color: '#e2e8f0' })),
+    ...wrap(legend.note, fonts.body).map((text) => ({ text, font: fonts.body, color: '#e2e8f0' })),
+    ...wrap(legend.footer, fonts.small).map((text) => ({ text, font: fonts.small, color: '#94a3b8' })),
+  ];
+  const legendH = Math.round(lineH * lines.length + 24 * unit);
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = base.height + legendH;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(base, 0, 0);
+  drawAiOverlay(
+    ctx,
+    {
+      heat: heatCanvas(res),
+      heatWidth: res.gridW * res.cellPx,
+      heatHeight: res.gridH * res.cellPx,
+      exemplars: res.exemplarsUsed,
+      regions: ai.corrections.map((c, i) => ({ ...c, label: legend.regionLabel(c.userCount, legend.fmt(sum.regions[i]!.model, 1)) })),
+    },
+    1 / Math.max(1, w / 1600),
+  );
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, base.height, w, legendH);
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  let y = base.height + 12 * unit + lineH / 2;
+  for (const l of lines) {
+    ctx.font = l.font;
+    ctx.fillStyle = l.color;
+    ctx.fillText(l.text, x0, y);
+    y += lineH;
+  }
   return canvasToBlob(canvas, 'image/png');
 }
 

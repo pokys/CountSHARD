@@ -124,9 +124,67 @@ export interface MultiShotInfo {
   droppedFromReference: number;
 }
 
+/**
+ * Counting mode. `circles` = Mode A (round-end detector, individually editable objects).
+ * `ai` = Mode B (generic objects, LOCA density estimate). The two never mix: an AI result is
+ * a density map and a total ESTIMATE, never a list of individually identified objects.
+ */
+export type CountMode = 'circles' | 'ai';
+
+/** Axis-aligned box in project-image pixels. */
+export interface AiBox {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** The user's count for a region; replaces the model's estimate inside it. */
+export interface AiRegionCorrection extends AiBox {
+  userCount: number;
+}
+
+export interface AiDensityResult {
+  kind: 'density-estimate';
+  model: string;
+  engine: string;
+  /** Project-image pixels per density cell (the grid starts at the image origin). */
+  cellPx: number;
+  gridW: number;
+  gridH: number;
+  /** Density per cell, Float32 little-endian, base64. Sums to `rawTotal`. */
+  density: string;
+  /** Model's estimate for the whole photo (sum of the density), before corrections. */
+  rawTotal: number;
+  tiles: number;
+  /** Model-input pixels per project pixel. */
+  scale: number;
+  /** True when the tile limit forced a smaller scale than the exemplars asked for. */
+  limitedByTiles: boolean;
+  /** Exemplars the model actually used (those fitting into one 512 px window). */
+  exemplarsUsed: AiBox[];
+  /** Ids of all exemplars drawn when the result was computed (to detect a stale result). */
+  inputExemplarIds: string[];
+  durationMs: number;
+  at: string;
+}
+
+export interface AiState {
+  /** 1–3 exemplar boxes drawn by the user. */
+  exemplars: AiBox[];
+  result: AiDensityResult | null;
+  /** Non-overlapping regions with a user count. */
+  corrections: AiRegionCorrection[];
+}
+
 export interface Project {
   format: 'countshard-project';
   version: 1;
+  /** Missing in projects saved before Mode B existed (= `circles`). */
+  mode?: CountMode;
+  /** Mode B state; missing/null until the user starts AI counting. */
+  ai?: AiState | null;
   id: string;
   name: string;
   createdAt: string;

@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
 import { checkOffline, isFullyOffline, type OfflineStatus } from '../pwa/offline';
 import { registerServiceWorker } from '../pwa/register';
+import { type AiStatus, aiClient } from '../ai/client';
 
 export function OfflineBadge({ engineLoaded }: { engineLoaded: boolean }) {
   const { t, fmt } = useI18n();
   const [status, setStatus] = useState<OfflineStatus | null>(null);
   const [open, setOpen] = useState(false);
   const [update, setUpdate] = useState<null | (() => void)>(null);
+  const [ai, setAi] = useState<AiStatus>(aiClient.status);
+  useEffect(() => aiClient.subscribe(setAi), []);
 
   useEffect(() => {
     registerServiceWorker({
@@ -19,7 +22,10 @@ export function OfflineBadge({ engineLoaded }: { engineLoaded: boolean }) {
 
   useEffect(() => {
     let alive = true;
-    const run = () => checkOffline(engineLoaded).then((s) => alive && setStatus(s));
+    const run = () => {
+      void aiClient.refresh();
+      return checkOffline(engineLoaded).then((s) => alive && setStatus(s));
+    };
     run();
     const id = setInterval(run, 15000);
     return () => {
@@ -54,8 +60,11 @@ export function OfflineBadge({ engineLoaded }: { engineLoaded: boolean }) {
             <Item ok={status.shellCached}>{t.offline_shell}</Item>
             <Item ok={status.engineCached}>{t.offline_engine_cached}</Item>
             <Item ok={status.engineLoaded}>{t.offline_engine_loaded}</Item>
-            <Item ok={false}>
-              {t.offline_ai}: {t.offline_ai_na}
+            {/* Mode B is optional: downloaded on first use, then cached for offline use. */}
+            <Item ok={ai.downloaded}>{ai.downloaded ? t.offline_ai_downloaded : t.offline_ai_not_downloaded}</Item>
+            <Item ok={ai.ready}>
+              {t.offline_ai_ready}
+              {ai.backend ? ` (${ai.backend === 'webgpu' ? 'WebGPU' : 'WASM'})` : ''}
             </Item>
             <Item ok={status.persisted}>{t.offline_persist}</Item>
           </ul>

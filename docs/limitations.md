@@ -14,8 +14,8 @@ Lower the sensitivity or remove false hits by tapping.
 
 **Non-circular ends.** Square/rectangular profiles, flattened or strongly oval
 tubes, and objects photographed at an angle (ellipses) are detected less reliably;
-perspective inflates diameter error (7 % at 0.88 squash). Generic AI counting (Mode B)
-is not implemented yet.
+perspective inflates diameter error (7 % at 0.88 squash). For such objects the AI mode
+("Obecné objekty (AI)") gives an estimate instead (see below).
 
 **Size classes** need about ≥ 10 % diameter difference to be separated
 automatically; closer sizes need "fixed number" mode or manual merge/split. Groups
@@ -30,7 +30,7 @@ object where possible.
 ≤ 1600 px (or 2400 px). Very large photos (> 50 MP) may fail to decode on phones
 with little memory. HEIC opens only in Safari.
 
-**First load** downloads ≈ 15 MB (mostly the OpenCV engine, ≈ 3.5–4 MB compressed
+**First load** (Mode A) downloads ≈ 15 MB (mostly the OpenCV engine, ≈ 3.5–4 MB compressed
 over the network depending on server compression). Offline use requires that first
 load to finish; the status chip shows when it has.
 
@@ -72,5 +72,33 @@ independent noise; see `testing.md`). Known limits:
 - Fusion takes ≈ 0.4–0.6 s detection + ≈ 0.5 s registration per photo at
   ≈ 1000×800 px in Node (WASM, single thread); phones will be slower.
 
-**Not implemented yet:** generic AI counting, Live Scan, PDF reports, automated
-browser E2E tests.
+**Generic objects (AI, Mode B)** — measured only on 10 synthetic scenes, 20 small
+FSC-147 images and 12 mosaics of them (`testing.md`); no real photos of the target use cases.
+- The result is an **estimate**: the sum of a density map. Individual objects are not
+  found, numbered or measured; there are no size groups or millimetres in this mode.
+  Mean absolute error on the 20 FSC-147 images was 8.7 % with outliers of 20–26 %
+  (+24 % on a dense stack of small log ends, −26 % on a photo of 11 apples).
+- With the default tiling the model tends to **over-count when the photo is upscaled**
+  (small exemplars, scale > 1): +2 … +9 % on synthetic scenes, up to +24 % on one FSC-147
+  image. Overall the tiling was not more accurate than LOCA's own squash-to-512 on the
+  evaluation images (`testing.md`).
+- Exemplars must be **close together** (inside one 512 px window at model scale); the
+  others are ignored and the result says so. 1–2 exemplars are repeated to the 3 LOCA
+  needs, which is less informative than 3 different ones.
+- Very small objects relative to the photo are processed at a reduced scale once the
+  16-tile limit is reached; the result then warns that the estimate may be low.
+- **Speed:** ≈ 3 s per 512 px tile with WebGPU on an Intel Gen12 laptop iGPU, ≈ 5 s per tile
+  on single-thread WASM (desktop CPU, measured in Node); phones without WebGPU will be
+  several times slower. A 16-tile photo can take minutes on WASM. Multi-threaded WASM is
+  not available on GitHub Pages (no cross-origin isolation).
+- **Memory:** the int8 model is expanded to fp32 when loaded (≈ 140 MB plus activations);
+  low-memory phones may fail to create the session.
+- **Download:** ≈ 63 MB on first use (35 MB model + 28 MB ONNX Runtime WASM). Clearing site
+  data removes it; the panel offers re-download and deletion.
+- **Licence:** the weights derive from CC BY-NC 4.0 SwAV weights — non-commercial use only.
+- Corrections are rectangles that must not overlap; a region's model value is the
+  area-weighted density sum (cells are 4 × 4 model pixels), so objects cut by the region
+  border count fractionally.
+- Changing the exemplars marks the result as stale; it is not re-run automatically.
+
+**Not implemented yet:** Live Scan, PDF reports, automated browser E2E tests.

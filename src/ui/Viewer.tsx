@@ -1,9 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import type { CountedObject, SizeGroup } from '../model/types';
-import { drawAnnotations } from '../io/draw';
+import { type AiOverlay, drawAiOverlay, drawAnnotations } from '../io/draw';
 import { hitTest } from '../state/project';
 
-export type Tool = 'edit' | 'select';
+/** Mode A: edit/select. Mode B (AI): draw exemplar boxes, draw correction regions, or just pan. */
+export type Tool = 'edit' | 'select' | 'exemplar' | 'region' | 'pan';
 
 export interface ViewerHandle {
   zoomBy(factor: number): void;
@@ -19,6 +20,11 @@ interface Props {
   tool: Tool;
   showOverlay: boolean;
   showRejected: boolean;
+  /** Mode B overlay. When set, the photo shows the density estimate instead of circles. */
+  ai?: AiOverlay | null;
+  /** Mode B: a rectangle was drawn with the exemplar or region tool (image coordinates). */
+  onDrawRect?(kind: 'exemplar' | 'region', x1: number, y1: number, x2: number, y2: number): void;
+  onSelectRegion?(id: string | null): void;
   onAdd(x: number, y: number): void;
   onRemove(id: string): void;
   onSelect(id: string | null): void;
@@ -38,7 +44,8 @@ type Gesture =
   | { kind: 'tap-or-pan'; startX: number; startY: number; view: View; t0: number; moved: boolean; hitId: string | null }
   | { kind: 'move'; id: string; dx: number; dy: number; moved: boolean }
   | { kind: 'resize'; id: string; moved: boolean }
-  | { kind: 'pinch'; d0: number; cx0: number; cy0: number; view: View };
+  | { kind: 'pinch'; d0: number; cx0: number; cy0: number; view: View }
+  | { kind: 'rect'; tool: 'exemplar' | 'region'; x0: number; y0: number; x1: number; y1: number };
 
 const TAP_SLOP = 7;
 
@@ -71,7 +78,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     // Not zoomed in: let a vertical swipe scroll the page (phones), otherwise the photo
     // would capture every swipe. Zoomed in: all gestures pan/zoom the photo.
     const zoomed = view.current.s > fitScale.current * 1.02;
-    canvas.style.touchAction = zoomed ? 'none' : 'pan-y';
+    // Drawing a box must not scroll the page either.
+    const drawing = !!p.ai && (p.tool === 'exemplar' || p.tool === 'region');
+    canvas.style.touchAction = zoomed || drawing ? 'none' : 'pan-y';
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#0b1220';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -79,7 +88,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     ctx.setTransform(v.s * dpr, 0, 0, v.s * dpr, v.tx * dpr, v.ty * dpr);
     ctx.imageSmoothingEnabled = v.s < 2;
     ctx.drawImage(p.image, 0, 0);
-    if (p.showOverlay) {
+    if (p.ai) {
+      if (p.showOverlay) {
+        const g = gesture.current;
+        const draft =
+          g.kind === 'rect'
+            ? { x: Math.min(g.x0, g.x1), y: Math.min(g.y0, g.y1), w: Math.abs(g.x1 - g.x0), h: Math.abs(g.y1 - g.y0), kind: g.tool }
+            : null;
+        drawAiOverlay(ctx, { ...p.ai, draft }, v.s);
+      }
+    } else if (p.showOverlay) {
       drawAnnotations(ctx, p.objects, p.groups, {
         pxPerUnit: v.s,
         numbers: p.numbers,
@@ -171,6 +189,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     }
     if (pointers.current.size > 2) return;
     const p = propsRef.current;
+    if (p.ai) {
+      if ((p.tool === 'exemplar' || p.tool === 'region') && p.showOverlay) {
+        gesture.current = { kind: 'rect', tool: p.tool, x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y };
+        return;
+      }
+      gesture.current = { kind: 'tap-or-pan', startX: pt.sx, startY: pt.sy, view: { ...view.current }, t0: performance.now(), moved: false, hitId: null };
+      return;
+    }
     if (p.tool === 'select' && p.showOverlay) {
       const sel = p.selectedId ? p.objects.find((o) => o.id === p.selectedId) : null;
       if (sel) {
@@ -215,6 +241,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         view.current = { s: g.view.s, tx: g.view.tx + dx, ty: g.view.ty + dy };
         requestDraw();
       }
+    } else if (g.kind === 'rect') {
+      g.x1 = pt.x;
+      g.y1 = pt.y;
+      requestDraw();
     } else if (g.kind === 'move') {
       g.moved = true;
       p.onMove(g.id, pt.x - g.dx, pt.y - g.dy, false);
@@ -239,6 +269,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     }
     gesture.current = { kind: 'none' };
     if (e.type === 'pointercancel') return;
+    if (g.kind === 'rect') {
+      requestDraw();
+      if (Math.abs(pt.x - g.x0) * view.current.s > TAP_SLOP && Math.abs(pt.y - g.y0) * view.current.s > TAP_SLOP) p.onDrawRect?.(g.tool, g.x0, g.y0, pt.x, pt.y);
+      return;
+    }
+    if (g.kind === 'tap-or-pan' && !g.moved && p.ai) {
+      const r = p.ai.regions.find((q) => pt.x >= q.x && pt.x <= q.x + q.w && pt.y >= q.y && pt.y <= q.y + q.h);
+      p.onSelectRegion?.(r?.id ?? null);
+      return;
+    }
     if (g.kind === 'tap-or-pan' && !g.moved) {
       if (p.tool === 'edit') {
         if (!p.showOverlay) return;

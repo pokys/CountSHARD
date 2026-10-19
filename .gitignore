@@ -5,3 +5,4 @@ coverage
 *.local
 test-results
 *.tsbuildinfo
+tests/eval/.data

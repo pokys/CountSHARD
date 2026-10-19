@@ -30,7 +30,15 @@ the browser.*
 - Multi-shot: fuse 2–5 photos of the same bundle taken from nearly the same spot;
   every object counts once and shows in how many photos it was seen.
 
-Not yet: generic AI counting — see [docs/roadmap.md](docs/roadmap.md).
+- **Generic objects (AI), mode "Obecné objekty (AI)":** mark 1–3 example objects and a
+  LOCA model running in the browser (WebGPU or WASM) estimates how many there are. The
+  result is shown as a density heat map and a total labelled as an **estimate** — objects
+  are not individually identified — and can be corrected region by region. The model
+  (≈ 63 MB with its runtime) is downloaded only when first used, then works offline.
+  **The AI model's weights are for non-commercial use only** (CC BY-NC 4.0 via SwAV) —
+  see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Not yet: Live Scan, PDF reports — see [docs/roadmap.md](docs/roadmap.md).
 
 ## Run
 
@@ -89,4 +97,6 @@ mode work from the published link.
 
 ## Licence
 
-[MIT](LICENSE). Third-party components: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Code: [MIT](LICENSE). Third-party components: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The AI model files in `public/models/loca/` are derived from non-commercially licensed
+weights (CC BY-NC 4.0) and are **not** covered by the MIT licence.

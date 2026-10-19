@@ -741,3 +741,61 @@ label.btn.disabled {
   opacity: 0.5;
   pointer-events: none;
 }
+
+/* Mode B (AI estimate) */
+.modebar {
+  display: flex;
+  margin: 8px 8px 0;
+  background: #0f172a;
+}
+.modebar button {
+  flex: 1 1 0;
+}
+.stage > .modebar {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.seg button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.estimate-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: #f59e0b;
+  color: #1c1917;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+.ai-download {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 12px;
+}
+.ai-download progress {
+  width: 100%;
+}
+.ai-pending {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  margin: 6px 0;
+}
+.linklike {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--focus);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.ms-list li.sel {
+  font-weight: 700;
+}
+.ms-list input {
+  width: 4.5em;
+}
