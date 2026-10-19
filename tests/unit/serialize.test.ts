@@ -62,4 +62,11 @@ describe('project file', () => {
     const noImage = { ...toProjectFile(project(), 'data:image/jpeg;base64,AAAA'), image: 'http://evil.example/x.jpg' };
     expect(() => parseProjectFile(JSON.stringify(noImage))).toThrow(ProjectFileError);
   });
+
+  it('still opens files exported under the old app name', () => {
+    const file = toProjectFile(project(), 'data:image/jpeg;base64,AAAA') as unknown as { format: string; project: { format: string } };
+    file.format = 'countit-project';
+    file.project.format = 'countit-project';
+    expect(parseProjectFile(JSON.stringify(file)).project.format).toBe('countshard-project');
+  });
 });

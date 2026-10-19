@@ -50,7 +50,7 @@ export function toCsv(p: Project, o: CsvOptions): string {
 }
 
 export interface ProjectFile {
-  format: 'countit-project';
+  format: 'countshard-project';
   version: 1;
   exportedAt: string;
   project: Project;
@@ -62,7 +62,7 @@ export interface ProjectFile {
 export function toProjectFile(p: Project, imageDataUrl: string): ProjectFile {
   const s = computeStats(p);
   return {
-    format: 'countit-project',
+    format: 'countshard-project',
     version: 1,
     exportedAt: new Date().toISOString(),
     project: p,
@@ -85,7 +85,12 @@ export function parseProjectFile(text: string): ProjectFile {
     throw new ProjectFileError('json');
   }
   const f = data as Partial<ProjectFile>;
-  if (!f || f.format !== 'countit-project') throw new ProjectFileError('format');
+  // Files exported before the rename used 'countit-project'; accept and upgrade them.
+  if (f && (f.format as string) === 'countit-project') {
+    f.format = 'countshard-project';
+    if (f.project) (f.project as { format: string }).format = 'countshard-project';
+  }
+  if (!f || f.format !== 'countshard-project') throw new ProjectFileError('format');
   if (f.version !== 1) throw new ProjectFileError('version');
   const p = f.project as Project | undefined;
   if (!p || !Array.isArray(p.objects) || !Array.isArray(p.groups) || !p.image || typeof p.image.width !== 'number') throw new ProjectFileError('structure');

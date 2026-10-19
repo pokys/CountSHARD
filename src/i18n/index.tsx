@@ -6,7 +6,7 @@ export type Lang = 'cs' | 'en';
 export type Messages = typeof cs;
 const MESSAGES: Record<Lang, Messages> = { cs, en };
 
-const KEY = 'countit.lang';
+const KEY = 'countshard.lang';
 
 function initialLang(): Lang {
   try {

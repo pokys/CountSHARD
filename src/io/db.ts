@@ -5,7 +5,7 @@
 import type { Project } from '../model/types';
 import { computeStats } from '../state/project';
 
-const DB_NAME = 'countit';
+const DB_NAME = 'countshard';
 const DB_VERSION = 1;
 
 export interface ProjectSummary {

@@ -11,8 +11,8 @@ export default defineConfig({
       injectRegister: false,
       includeAssets: ['icon.svg'],
       manifest: {
-        name: 'CountIT – počítání objektů na fotografii',
-        short_name: 'CountIT',
+        name: 'CountSHARD – počítání objektů na fotografii',
+        short_name: 'CountSHARD',
         description: 'Offline počítání trubek, tyčí a dalších objektů na fotografii. Snímky neopouštějí zařízení.',
         lang: 'cs',
         start_url: './',

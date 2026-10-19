@@ -14,7 +14,7 @@ Tools used:
 
 No access restriction was bypassed. No code, text, model file or asset from the
 site was copied into this repository. The bundle is minified, proprietary JavaScript
-with no licence statement; it is **not** treated as open source. CountIT's detector
+with no licence statement; it is **not** treated as open source. CountSHARD's detector
 was designed and written independently (see `technical-decisions.md`); the only place
 where the observed *approach* is re-created is the evaluation baseline in
 `tests/eval/baseline.ts`, written from the OpenCV documentation to measure against.
@@ -80,7 +80,7 @@ UI correctly shows a heat map rather than per-object marks.
 | Component | Licence | Notes |
 |---|---|---|
 | LoreaTec page/bundle | proprietary (no licence) | not reused |
-| OpenCV.js (`@techstark/opencv-js`) | Apache-2.0 | used by CountIT, bundled locally |
+| OpenCV.js (`@techstark/opencv-js`) | Apache-2.0 | used by CountSHARD, bundled locally |
 | ONNX Runtime Web | MIT | candidate for Phase 4 |
 | LOCA code (`github.com/djukicn/loca`) | MIT | the URL in the brief (`valeoai/LOCA`) returns 404 |
 | LOCA pretrained weights | **unclear** | published on Google Drive without a separate licence; the backbone is initialised from **SwAV ResNet-50, whose repository is CC BY-NC 4.0** (non-commercial); trained on FSC-147 (research dataset) |
@@ -94,11 +94,11 @@ a legal risk that must be resolved by the owner before Phase 4 (see roadmap).
 
 The observed size-estimation + Hough approach was re-implemented from the OpenCV
 documentation (`tests/eval/baseline.ts`) and run on the same synthetic scenes as
-CountIT. It is a re-creation of the approach, **not** the reference site itself; the
+CountSHARD. It is a re-creation of the approach, **not** the reference site itself; the
 site cannot be driven reproducibly from tests, and its UI parameters (manual diameter
 slider) would let a user rescue many of the failures below.
 
-| scene | ground truth | baseline count | CountIT count |
+| scene | ground truth | baseline count | CountSHARD count |
 |---|---|---|---|
 | uniform rods (hex-packed) | 296 | 34 | 292 |
 | uniform tubes | 217 | 0 | 216 |

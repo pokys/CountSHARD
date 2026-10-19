@@ -361,7 +361,7 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
   const json = async () => {
     const dataUrl = await blobToDataUrl(await canvasToBlob(canvas, 'image/jpeg', 0.92));
     const file = toProjectFile(project, dataUrl);
-    downloadBlob(new Blob([JSON.stringify(file)], { type: 'application/json' }), `${base}.countit.json`);
+    downloadBlob(new Blob([JSON.stringify(file)], { type: 'application/json' }), `${base}.countshard.json`);
   };
 
   return (

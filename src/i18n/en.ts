@@ -1,7 +1,7 @@
 import type { cs } from './cs';
 
 export const en: typeof cs = {
-  appName: 'CountIT',
+  appName: 'CountSHARD',
   tagline: 'Count pipes, rods and other round objects in a photo – offline, on your device.',
   offline_title: 'Offline readiness',
   offline_ready: 'Ready offline',
@@ -129,10 +129,10 @@ export const en: typeof cs = {
   export_csv: 'Table (CSV)',
   export_json: 'Project (JSON)',
   saved_locally: 'The project is saved continuously on this device.',
-  legend_title: 'CountIT',
+  legend_title: 'CountSHARD',
   legend_total: (n: number) => `total ${n} pcs`,
   legend_group: (label: string, count: number, d: string) => `${label}: ${count} pcs · Ø ${d}`,
-  legend_footer: (date: string) => `Created ${date} with CountIT. Automatic detection with manual review.`,
+  legend_footer: (date: string) => `Created ${date} with CountSHARD. Automatic detection with manual review.`,
   csv: {
     number: 'Number', x: 'X (px)', y: 'Y (px)', diameterPx: 'Diameter (px)', diameterMm: 'Diameter (mm)',
     group: 'Group', source: 'Source', review: 'Review', score: 'Edge match',

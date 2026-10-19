@@ -90,7 +90,7 @@ export interface AnalysisInfo {
 }
 
 export interface Project {
-  format: 'countit-project';
+  format: 'countshard-project';
   version: 1;
   id: string;
   name: string;

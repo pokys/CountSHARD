@@ -87,5 +87,5 @@ export async function dataUrlToBlob(url: string): Promise<Blob> {
 }
 
 export function safeFilename(name: string): string {
-  return name.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80) || 'countit';
+  return name.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80) || 'countshard';
 }

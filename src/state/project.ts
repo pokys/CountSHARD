@@ -26,7 +26,7 @@ export function newId(prefix: string): string {
 export function createProject(image: Project['image']): Project {
   const now = new Date().toISOString();
   return {
-    format: 'countit-project',
+    format: 'countshard-project',
     version: 1,
     id: newId('p'),
     name: image.name.replace(/\.[^.]+$/, '') || 'Projekt',

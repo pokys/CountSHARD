@@ -39,7 +39,7 @@ thread, OpenCV.js WASM). "Baseline" = single-band Hough with distance-transform 
 estimate, i.e. the approach observed on the reference site, re-implemented for
 comparison (`tests/eval/baseline.ts`) — not the reference site itself.
 
-| scene | GT | CountIT | P | R | count err | r MAPE | ms | baseline | P | R | count err |
+| scene | GT | CountSHARD | P | R | count err | r MAPE | ms | baseline | P | R | count err |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | uniform-rods | 296 | 292 | 1.000 | 0.986 | −4 | 2.5 % | 370 | 34 | 0.176 | 0.020 | −262 |
 | uniform-tubes | 217 | 216 | 1.000 | 0.995 | −1 | 1.5 % | 501 | 0 | — | 0.000 | −217 |

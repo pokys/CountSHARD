@@ -61,7 +61,7 @@ warnings).
 ## Circle detection
 
 Reference behaviour (single radius band from one size estimate) fails on packed
-bundles and mixed sizes (see `research/loreatec-analysis.md` §5). CountIT's detector
+bundles and mixed sizes (see `research/loreatec-analysis.md` §5). CountSHARD's detector
 (`src/analysis/circles.ts`):
 
 1. **CLAHE** normalises uneven lighting.

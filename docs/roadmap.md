@@ -17,7 +17,7 @@ Status as of 2026-10-19.
 ## Next
 
 1. **Real-photo evaluation set** (highest value). 20–50 photos of real bundles,
-   annotated centres/diameters (a small annotation export from CountIT itself is
+   annotated centres/diameters (a small annotation export from CountSHARD itself is
    enough: count with the app, fix every error by hand, export JSON). Re-tune the
    detector on it; add it to `npm run eval`.
 2. **Playwright E2E** for import → detect → correct → export and offline reload.

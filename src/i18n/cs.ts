@@ -1,5 +1,5 @@
 export const cs = {
-  appName: 'CountIT',
+  appName: 'CountSHARD',
   tagline: 'Počítání trubek, tyčí a dalších kulatých objektů na fotografii – offline, přímo v zařízení.',
   // offline / status
   offline_title: 'Připravenost offline',
@@ -138,10 +138,10 @@ export const cs = {
   export_csv: 'Tabulka (CSV)',
   export_json: 'Projekt (JSON)',
   saved_locally: 'Projekt se průběžně ukládá v tomto zařízení.',
-  legend_title: 'CountIT',
+  legend_title: 'CountSHARD',
   legend_total: (n: number) => `celkem ${n} ks`,
   legend_group: (label: string, count: number, d: string) => `${label}: ${count} ks · Ø ${d}`,
-  legend_footer: (date: string) => `Vytvořeno ${date} v aplikaci CountIT. Automatická detekce s ruční kontrolou.`,
+  legend_footer: (date: string) => `Vytvořeno ${date} v aplikaci CountSHARD. Automatická detekce s ruční kontrolou.`,
   csv: {
     number: 'Číslo', x: 'X (px)', y: 'Y (px)', diameterPx: 'Průměr (px)', diameterMm: 'Průměr (mm)',
     group: 'Skupina', source: 'Zdroj', review: 'Kontrola', score: 'Shoda okraje',

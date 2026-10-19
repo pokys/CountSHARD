@@ -129,7 +129,7 @@ describe('calibration', () => {
 describe('createProject', () => {
   it('produces a versioned, empty project', () => {
     const p = createProject({ name: 'trubky.jpg', width: 100, height: 80, originalWidth: 100, originalHeight: 80, mime: 'image/jpeg' });
-    expect(p.format).toBe('countit-project');
+    expect(p.format).toBe('countshard-project');
     expect(p.name).toBe('trubky');
     expect(p.objects).toEqual([]);
   });

@@ -1,6 +1,6 @@
 /**
  * Detector evaluation on the synthetic suite. Prints a comparison table
- * (CountIT detector vs. single-range baseline). Run: npm run eval
+ * (CountSHARD detector vs. single-range baseline). Run: npm run eval
  */
 import { describe, it } from 'vitest';
 import { loadCv } from '../loadCv';
@@ -14,7 +14,7 @@ describe('detector evaluation (synthetic)', () => {
   it('prints metrics table', async () => {
     const cv = await loadCv();
     const rows: string[] = [];
-    rows.push('| scene | GT | CountIT det | P | R | count err | r MAPE | ms | baseline det | P | R | count err |');
+    rows.push('| scene | GT | CountSHARD det | P | R | count err | r MAPE | ms | baseline det | P | R | count err |');
     rows.push('|---|---|---|---|---|---|---|---|---|---|---|---|');
     for (const spec of SCENES) {
       const scene = makeScene(cv, spec);

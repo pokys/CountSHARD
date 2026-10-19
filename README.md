@@ -1,4 +1,4 @@
-# CountIT
+# CountSHARD
 
 **Offline počítání trubek, tyčí a dalších kulatých objektů na fotografii.**
 Vyfoťte svazek z čela, aplikace objekty spočítá, rozdělí podle průměru a vy chyby
