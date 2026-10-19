@@ -9,9 +9,11 @@ import {
   mergeDetections,
   mergeGroups,
   numbering,
+  hitTest,
   removeGroup,
   removeObject,
   setObjectGroup,
+  setReview,
   splitGroup,
   updateObject,
 } from '../../src/state/project';
@@ -151,5 +153,40 @@ describe('createProject', () => {
     expect(p.format).toBe('countshard-project');
     expect(p.name).toBe('trubky');
     expect(p.objects).toEqual([]);
+  });
+});
+
+describe('multi-shot results in the project', () => {
+  const fused = (x: number, agreement: 'consistent' | 'majority' | 'minority' | 'uncertain') => ({
+    ...circle(x, 10),
+    multiShot: { seenIn: agreement === 'consistent' ? 3 : 1, inFrame: 3, agreement },
+  });
+
+  it('keeps corrections when a fused result replaces a single-photo one', () => {
+    let objs = base();
+    objs = removeObject(objs, objs[0]!.id); // rejected at (10, 10)
+    objs = addManualObject(objs, 100, 10, 10, null).objects;
+    const next = mergeDetections(objs, [fused(10, 'consistent'), fused(40, 'consistent'), fused(101, 'minority'), fused(130, 'uncertain')]);
+    expect(next.filter((o) => o.review === 'rejected')).toHaveLength(1);
+    expect(next.filter((o) => o.source === 'manual')).toHaveLength(1);
+    const stats = computeStats({ objects: next, groups: [], calibration: null });
+    // 40 (fused) + manual 100; the uncertain one at 130 is a candidate only.
+    expect(stats.total).toBe(2);
+    expect(stats.candidates).toBe(1);
+  });
+
+  it('counts an uncertain candidate only after the user confirms it, and it stays selectable', () => {
+    const objs = mergeDetections([], [fused(10, 'consistent'), fused(40, 'uncertain'), fused(70, 'minority')]);
+    const stats = computeStats({ objects: objs, groups: [], calibration: null });
+    expect(stats.total).toBe(2);
+    expect(stats.multiShotFlagged).toBe(1);
+    const cand = hitTest(objs, 40, 10)!;
+    expect(cand.multiShot?.agreement).toBe('uncertain');
+    const confirmed = setReview(objs, [cand.id], 'confirmed');
+    expect(computeStats({ objects: confirmed, groups: [], calibration: null }).total).toBe(3);
+    // Removing a candidate rejects it, so re-fusion keeps it out.
+    const removed = removeObject(objs, cand.id);
+    const again = mergeDetections(removed, [fused(10, 'consistent'), fused(40, 'uncertain')]);
+    expect(again.filter((o) => Math.abs(o.x - 40) < 1 && o.review !== 'rejected')).toHaveLength(0);
   });
 });

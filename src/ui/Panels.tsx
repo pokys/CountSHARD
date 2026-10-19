@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
-import { type CountedObject, type Project, isCounted } from '../model/types';
+import { type CountedObject, type MultiShotInfo, type Project, isCandidate, isCounted } from '../model/types';
 import { MIN_GROUP_SIZE } from '../analysis/clustering';
 import {
   type ProjectStats,
@@ -40,6 +40,7 @@ export function ResultPanel({ stats, onConfirmAll }: { stats: ProjectStats; onCo
         <span className="unit">{t.pcs}</span>
       </div>
       <p className="muted small">{t.breakdown(stats.auto, stats.manual, stats.rejected)}</p>
+      {stats.candidates > 0 && <p className="small warn">{t.candidates_note(stats.candidates)}</p>}
       <div className="row between">
         <span className="small">{t.review_status(stats.confirmed, stats.total)}</span>
         {stats.unreviewed > 0 && (
@@ -181,7 +182,9 @@ export function SelectedPanel({ obj, number, project, commit, onRemove }: { obj:
             · {t.score} {fmt(obj.score * 100, 0)} %
           </span>
         )}
+        {obj.multiShot && <> · {t.ms_seen(obj.multiShot.seenIn, obj.multiShot.inFrame)}</>}
       </p>
+      {isCandidate(obj) && <p className="small warn">{t.ms_candidate}</p>}
       <div className="form-grid">
         <label>
           <span>{t.group}</span>
@@ -214,8 +217,16 @@ export function SelectedPanel({ obj, number, project, commit, onRemove }: { obj:
           {t.remove}
         </button>
         {obj.review !== 'confirmed' && (
-          <button className="btn small" onClick={() => commit((p) => ({ ...p, objects: setReview(p.objects, [obj.id], 'confirmed') }))}>
-            {t.confirm}
+          <button
+            className="btn small"
+            onClick={() =>
+              commit((p) => {
+                const objects = setReview(p.objects, [obj.id], 'confirmed');
+                return { ...p, ...applyGrouping(objects, p.groups, p.grouping) };
+              })
+            }
+          >
+            {isCandidate(obj) ? t.ms_count_it : t.confirm}
           </button>
         )}
       </div>
@@ -337,6 +348,98 @@ export function SettingsPanel({ project, commit, running, onRun }: { project: Pr
       </button>
       <p className="muted tiny">{t.rerun_hint}</p>
       {project.analysis && <p className="muted tiny">{t.analysis_info(project.analysis.durationMs, project.analysis.analysisWidth, project.analysis.analysisHeight)}</p>}
+    </section>
+  );
+}
+
+export interface ExtraPhoto {
+  name: string;
+  canvas: HTMLCanvasElement;
+}
+
+/** Multi-shot: extra photos of the same bundle, fused into the project photo. */
+export function MultiShotPanel({
+  photos,
+  report,
+  running,
+  onAdd,
+  onRemove,
+  onRun,
+}: {
+  photos: ExtraPhoto[];
+  report: MultiShotInfo | null;
+  running: boolean;
+  onAdd(files: File[]): void;
+  onRemove(index: number): void;
+  onRun(): void;
+}) {
+  const { t, fmt } = useI18n();
+  const refused = report ? report.photos.filter((p) => p.status !== 'reference' && p.status !== 'used').length : 0;
+  const noGain = report?.status === 'fused' && report.addedCount === 0 && report.droppedFromReference === 0 && report.uncertainCount === 0;
+  return (
+    <section className="card">
+      <h2>{t.ms_title}</h2>
+      <p className="muted tiny">{t.ms_hint}</p>
+      <ol className="ms-list small">
+        <li>{t.ms_photo(0)}</li>
+        {photos.map((p, i) => (
+          <li key={i}>
+            <span className="ms-name">{p.name}</span>{' '}
+            <button className="btn ghost small" onClick={() => onRemove(i)} disabled={running}>
+              {t.ms_remove}
+            </button>
+          </li>
+        ))}
+      </ol>
+      <div className="row wrap">
+        <label className={`btn small${photos.length >= 4 || running ? ' disabled' : ''}`}>
+          {t.ms_add}
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            disabled={photos.length >= 4 || running}
+            onChange={(e) => {
+              onAdd(Array.from(e.target.files ?? []));
+              e.target.value = '';
+            }}
+          />
+        </label>
+        <button className="btn primary small" disabled={!photos.length || running} onClick={onRun} data-testid="fuse">
+          {t.ms_run}
+        </button>
+      </div>
+      {photos.length > 0 && <p className="muted tiny">{t.ms_not_saved}</p>}
+      {report && (
+        <div className="ms-report" role="status" data-testid="fusion-report">
+          {report.status === 'refused' ? (
+            <p className="small warn">{t.ms_refused}</p>
+          ) : (
+            <>
+              <p className="small">{t.ms_result_fused(report.photos.length - refused, report.countedTotal, report.referenceCount)}</p>
+              {noGain && <p className="small">{t.ms_no_gain}</p>}
+              {report.addedCount > 0 && <p className="small">{t.ms_result_added(report.addedCount)}</p>}
+              {report.flaggedCount > 0 && <p className="small">{t.ms_result_flagged(report.flaggedCount)}</p>}
+              {report.uncertainCount > 0 && <p className="small warn">{t.ms_result_uncertain(report.uncertainCount)}</p>}
+              {report.droppedFromReference > 0 && <p className="small">{t.ms_result_dropped(report.droppedFromReference)}</p>}
+              {refused > 0 && <p className="small warn">{t.ms_partial(refused)}</p>}
+            </>
+          )}
+          <ol className="ms-list tiny">
+            {report.photos.map((p, i) => (
+              <li key={i}>
+                <span className="ms-name">{p.name}</span>:{' '}
+                {p.status === 'reference'
+                  ? t.ms_status_ref(p.detections)
+                  : p.status === 'used'
+                    ? t.ms_status_used(Math.round((p.agreement ?? 0) * 100), p.inliers, fmt(p.residualPx, 1))
+                    : t.ms_status_refused(t.ms_reason[p.reason ?? ''] ?? p.reason ?? '')}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
     </section>
   );
 }

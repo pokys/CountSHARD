@@ -38,5 +38,33 @@ load to finish; the status chip shows when it has.
 data deletes them. Export JSON to keep a copy. Persistent storage is requested but
 browsers may refuse it.
 
-**Not implemented yet:** generic AI counting, multi-shot fusion, Live Scan, PDF
-reports, automated browser E2E tests.
+**Multi-shot fusion** is measured only on synthetic photo series (small shift,
+rotation ≤ 2°, scale ≤ 3 %, slight perspective, one occluding bar per photo,
+independent noise; see `testing.md`). Known limits:
+- Photos must be taken from *nearly the same viewpoint*. Corner displacement above
+  20 % of the diagonal, or any registration with < 40 RANSAC inliers, inlier ratio
+  < 15 %, inliers covering < 20 % of the frame or RMS residual > 2.5 px, is refused.
+  Larger viewpoint changes (walking around the stack, strong tilt) are out of scope.
+- The homography assumes the end faces lie roughly in one plane. Strongly staggered
+  ends or a deep stack seen at an angle violate this and are likely to be refused or
+  to fuse less accurately.
+- With **two** photos a disagreement cannot be settled by majority: an object seen in
+  only one of them counts only if its edge support is strong (≥ 0.8) and it does not
+  overlap an object both photos agree on; otherwise it is an *uncertain candidate*
+  ("?") that does not count until confirmed. Hidden-in-one-photo objects can
+  therefore end up as candidates (synthetic: up to 11 of 217 tubes with 2 photos).
+- Noisy, blurred photos: fusion improves recall and removes most single-photo false
+  positives, but systematic false hits that recur in several photos are counted
+  (synthetic `noisy-blurred`: 34–88 false positives depending on the series, vs
+  92–118 for the reference photo alone).
+- The extra photos are kept in memory only; the project saves the fused result and a
+  per-photo summary, not the extra images. Moving the sensitivity slider or "Count
+  again" re-analyses the project photo alone and replaces the (unreviewed) fused
+  objects; corrections are kept as usual.
+- Objects visible only in the extra photos but outside the reference frame cannot be
+  shown and are not counted.
+- Fusion takes ≈ 0.4–0.6 s detection + ≈ 0.5 s registration per photo at
+  ≈ 1000×800 px in Node (WASM, single thread); phones will be slower.
+
+**Not implemented yet:** generic AI counting, Live Scan, PDF reports, automated
+browser E2E tests.

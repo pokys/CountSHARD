@@ -68,6 +68,9 @@ is needed after install. `pwa/offline.ts` verifies each layer separately.
 - New detectors (e.g. AI) → new worker request type in `workers/protocol.ts`, results
   merged through the same `mergeDetections` (instance models) or a separate
   estimate-only result type (density models).
-- Multi-shot → a `MultiShotProject` holding several `ImageInfo`s with homographies to
-  a reference; fusion produces ordinary `CountedObject`s in reference coordinates plus
-  per-object observation counts.
+- Multi-shot (implemented, `analysis/registration.ts`, `analysis/fusion.ts`, worker
+  request `fuse`): the project photo is the reference; extra photos are registered
+  onto it (ORB + RANSAC homography), detections are fused into ordinary
+  `CountedObject`s in reference coordinates with `multiShot` = seen in k of n photos.
+  Extra photos are held in memory only; the fused result goes through the same
+  `mergeDetections`, so corrections and undo behave as for a single photo.

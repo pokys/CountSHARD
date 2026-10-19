@@ -9,8 +9,12 @@ import {
   type Project,
   type SizeGroup,
   DEFAULT_DETECTION_PARAMS,
+  type MultiShotObservation,
   DEFAULT_GROUPING,
+  isCandidate,
   isCounted,
+  isMultiShotFlagged,
+  isSelectable,
 } from '../model/types';
 
 export const APP_VERSION = '0.1.0';
@@ -48,6 +52,8 @@ export interface DetectedCircle {
   y: number;
   r: number;
   score: number;
+  /** Set for multi-shot fusion results. */
+  multiShot?: MultiShotObservation;
 }
 
 /**
@@ -72,6 +78,7 @@ export function mergeDetections(objects: CountedObject[], detected: DetectedCirc
       review: 'unreviewed',
       groupId: null,
       groupLocked: false,
+      ...(d.multiShot ? { multiShot: d.multiShot } : {}),
     }));
   return [...kept, ...fresh];
 }
@@ -249,6 +256,10 @@ export interface ProjectStats {
   confirmed: number;
   unreviewed: number;
   ungrouped: number;
+  /** Multi-shot review candidates (not counted). */
+  candidates: number;
+  /** Counted multi-shot objects seen in at most half of the photos (unreviewed). */
+  multiShotFlagged: number;
   groups: GroupStats[];
 }
 
@@ -273,6 +284,8 @@ export function computeStats(p: Pick<Project, 'objects' | 'groups' | 'calibratio
     confirmed: counted.filter((o) => o.review === 'confirmed').length,
     unreviewed: counted.filter((o) => o.review === 'unreviewed').length,
     ungrouped: counted.filter((o) => !o.groupId || !p.groups.some((g) => g.id === o.groupId)).length,
+    candidates: p.objects.filter(isCandidate).length,
+    multiShotFlagged: counted.filter(isMultiShotFlagged).length,
     groups,
   };
 }
@@ -285,12 +298,12 @@ export function numbering(objects: CountedObject[]): Map<string, number> {
   return new Map(sorted.map((o, i) => [o.id, i + 1]));
 }
 
-/** Hit test in image coordinates; returns the nearest counted object containing the point. */
+/** Hit test in image coordinates; returns the nearest selectable object containing the point. */
 export function hitTest(objects: CountedObject[], x: number, y: number, slack = 1.05): CountedObject | null {
   let best: CountedObject | null = null;
   let bestD = Infinity;
   for (const o of objects) {
-    if (!isCounted(o)) continue;
+    if (!isSelectable(o)) continue;
     const d = Math.hypot(o.x - x, o.y - y);
     if (d < Math.max(o.r * slack, 6) && d < bestD) {
       best = o;

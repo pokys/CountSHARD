@@ -14,7 +14,7 @@
  *  5. Overlap suppression (prefers the outer wall over the bore of a tube) and
  *     removal of "aggregate" circles that enclose several accepted objects.
  */
-import { type CV, withMats } from './cv';
+import { type CV, type Mat, withMats } from './cv';
 
 export interface GrayImage {
   data: Uint8Array | Uint8ClampedArray;
@@ -75,19 +75,7 @@ export function detectCircles(cv: CV, img: GrayImage, opts: CircleDetectOptions)
     const src = track(new cv.Mat(h, w, cv.CV_8UC1));
     src.data.set(img.data);
 
-    const eq = track(new cv.Mat());
-    const clahe = track(new cv.CLAHE(2.0, new cv.Size(8, 8)));
-    clahe.apply(src, eq);
-
-    // Gradient field for verification/refinement, smoothed relative to the smallest size of interest.
-    const smooth = track(new cv.Mat());
-    const sigma = Math.max(1, Math.min(4, rMin / 6));
-    cv.GaussianBlur(eq, smooth, new cv.Size(0, 0), sigma, sigma, cv.BORDER_REPLICATE);
-    const gxM = track(new cv.Mat());
-    const gyM = track(new cv.Mat());
-    cv.Sobel(smooth, gxM, cv.CV_32F, 1, 0, 3);
-    cv.Sobel(smooth, gyM, cv.CV_32F, 0, 1, 3);
-    const field = makeField(gxM.data32F as Float32Array, gyM.data32F as Float32Array, w, h);
+    const { eq, field } = gradientField(cv, src, rMin, track);
 
     // Median filtering suppresses texture but must not erase the thin dark seams
     // between tightly packed small objects, so the kernel follows the radius band.
@@ -160,6 +148,45 @@ export function detectCircles(cv: CV, img: GrayImage, opts: CircleDetectOptions)
 }
 
 // ---------------------------------------------------------------------------
+
+/** CLAHE-normalised image and the gradient field used for verification/refinement. */
+function gradientField(cv: CV, src: Mat, rMin: number, track: <M extends { delete(): void }>(m: M) => M) {
+  const eq = track(new cv.Mat());
+  const clahe = track(new cv.CLAHE(2.0, new cv.Size(8, 8)));
+  clahe.apply(src, eq);
+  // Smoothed relative to the smallest size of interest.
+  const smooth = track(new cv.Mat());
+  const sigma = Math.max(1, Math.min(4, rMin / 6));
+  cv.GaussianBlur(eq, smooth, new cv.Size(0, 0), sigma, sigma, cv.BORDER_REPLICATE);
+  const gxM = track(new cv.Mat());
+  const gyM = track(new cv.Mat());
+  cv.Sobel(smooth, gxM, cv.CV_32F, 1, 0, 3);
+  cv.Sobel(smooth, gyM, cv.CV_32F, 0, 1, 3);
+  return { eq, field: makeField(gxM.data32F as Float32Array, gyM.data32F as Float32Array, src.cols, src.rows) };
+}
+
+/**
+ * Edge support of given circles in `img`, after a small local refinement (±15 % radius,
+ * a few pixels of centre) that absorbs registration error. Used by multi-shot fusion
+ * to re-check, in another photo, an object that photo's detector did not report.
+ */
+export function measureSupport(cv: CV, img: GrayImage, circles: { x: number; y: number; r: number }[]): number[] {
+  if (!circles.length) return [];
+  const rMin = Math.max(3, Math.min(...circles.map((c) => c.r)));
+  return withMats((track) => {
+    const src = track(new cv.Mat(img.height, img.width, cv.CV_8UC1));
+    src.data.set(img.data);
+    const { field } = gradientField(cv, src, rMin, track);
+    return circles.map((c) => {
+      const first = edgeSupport(field, c.x, c.y, c.r);
+      if (first.inside < 0.6) return 0;
+      const ref = refine(field, { ...c, score: 0 }, c.r * 0.85, c.r * 1.15);
+      if (Math.hypot(ref.x - c.x, ref.y - c.y) > 0.3 * c.r) return first.coverage;
+      const sup = edgeSupport(field, ref.x, ref.y, ref.r);
+      return Math.max(first.coverage, sup.inside < 0.6 ? 0 : sup.coverage);
+    });
+  });
+}
 
 export interface Field {
   gx: Float32Array;

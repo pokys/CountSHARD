@@ -31,6 +31,16 @@ export interface CountedObject {
   groupId: string | null;
   /** True when the user assigned the group manually; automatic clustering keeps it. */
   groupLocked: boolean;
+  /** Present when the object comes from multi-shot fusion: in how many photos it was seen. */
+  multiShot?: MultiShotObservation;
+}
+
+/** Cross-photo agreement of one fused object (see src/analysis/fusion.ts). */
+export interface MultiShotObservation {
+  seenIn: number;
+  inFrame: number;
+  /** `uncertain` objects are review candidates and do not count until confirmed. */
+  agreement: 'consistent' | 'majority' | 'minority' | 'uncertain';
 }
 
 export interface SizeGroup {
@@ -87,6 +97,31 @@ export interface AnalysisInfo {
   analysisHeight: number;
   estimatedDiameterPx: [number, number] | null;
   at: string;
+  /** Set when the result comes from fusing several photos. */
+  multiShot?: MultiShotInfo;
+}
+
+export interface MultiShotPhotoInfo {
+  name: string;
+  status: 'reference' | 'used' | 'refused-registration' | 'refused-inconsistent';
+  reason?: string;
+  detections: number;
+  inliers: number;
+  residualPx: number;
+  agreement: number | null;
+  added: number;
+}
+
+/** Summary of the last multi-shot fusion (also kept when fusion was refused). */
+export interface MultiShotInfo {
+  status: 'fused' | 'refused';
+  photos: MultiShotPhotoInfo[];
+  referenceCount: number;
+  countedTotal: number;
+  addedCount: number;
+  flaggedCount: number;
+  uncertainCount: number;
+  droppedFromReference: number;
 }
 
 export interface Project {
@@ -116,7 +151,22 @@ export const DEFAULT_DETECTION_PARAMS: DetectionParams = {
 
 export const DEFAULT_GROUPING: GroupingParams = { mode: 'auto', k: 2, minSeparation: 0.1 };
 
+/** A fused object the photos disagree about; shown for review, not counted until confirmed. */
+export function isCandidate(o: CountedObject): boolean {
+  return o.review === 'unreviewed' && o.multiShot?.agreement === 'uncertain';
+}
+
 /** Objects that count towards the total. */
 export function isCounted(o: CountedObject): boolean {
+  return o.review !== 'rejected' && !isCandidate(o);
+}
+
+/** Objects the user can select and edit: counted ones and review candidates. */
+export function isSelectable(o: CountedObject): boolean {
   return o.review !== 'rejected';
+}
+
+/** Counted object seen in at most half of the photos covering it (multi-shot). */
+export function isMultiShotFlagged(o: CountedObject): boolean {
+  return o.review === 'unreviewed' && o.multiShot?.agreement === 'minority';
 }

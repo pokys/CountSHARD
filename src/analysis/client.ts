@@ -2,6 +2,7 @@
  * Main-thread client for the analysis worker: progress, cancellation, warm-up.
  */
 import type { Circle } from './circles';
+import type { FusionResult } from './fusion';
 import type { WorkerRequest, WorkerResponse } from '../workers/protocol';
 
 export class CancelledError extends Error {
@@ -99,6 +100,21 @@ class AnalysisClient {
     );
     if (res.type !== 'result') throw new Error('Unexpected worker response');
     return { circles: res.circles, radiusRange: res.radiusRange, durationMs: res.durationMs, candidates: res.candidates };
+  }
+
+  /**
+   * Multi-shot: `images[0]` is the reference. Detection runs with the same settings in
+   * every photo; coordinates in the result are reference analysis pixels.
+   */
+  async fuse(images: ImageData[], opts: Omit<DetectInput, 'image'>, onProgress?: (f: number) => void): Promise<{ fusion: FusionResult; durationMs: number }> {
+    const photos = images.map((im) => ({ rgba: im.data.buffer.slice(0) as ArrayBuffer, width: im.width, height: im.height }));
+    const res = await this.send(
+      { type: 'fuse', id: ++this.seq, photos, sensitivity: opts.sensitivity, minRadius: opts.minRadius, maxRadius: opts.maxRadius },
+      photos.map((p) => p.rgba),
+      onProgress,
+    );
+    if (res.type !== 'fused') throw new Error('Unexpected worker response');
+    return { fusion: res.fusion, durationMs: res.durationMs };
   }
 
   /** Aborts all running work by terminating the worker. The next call starts a fresh one. */

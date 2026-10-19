@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
-import { type Project, isCounted } from '../model/types';
+import { type MultiShotInfo, type Project, isCounted, isSelectable } from '../model/types';
 import { median } from '../analysis/clustering';
 import { CancelledError, analysisClient } from '../analysis/client';
-import { analysisPixels } from '../io/image';
+import { ImageLoadError, analysisPixels, loadImageFile } from '../io/image';
 import { saveProject } from '../io/db';
 import { initHistory, push, redo, undo, type History } from '../state/history';
 import {
@@ -18,7 +18,7 @@ import {
 } from '../state/project';
 import type { Session } from './App';
 import { Viewer, type Tool, type ViewerHandle } from './Viewer';
-import { CalibrationPanel, ExportPanel, GroupsPanel, ResultPanel, SelectedPanel, SettingsPanel } from './Panels';
+import { CalibrationPanel, ExportPanel, type ExtraPhoto, GroupsPanel, MultiShotPanel, ResultPanel, SelectedPanel, SettingsPanel } from './Panels';
 
 interface Props {
   session: Session;
@@ -30,7 +30,7 @@ interface Props {
 export type Commit = (fn: (p: Project) => Project, coalesce?: boolean) => void;
 
 interface Progress {
-  phase: 'engine' | 'detect';
+  phase: 'engine' | 'detect' | 'fuse';
   fraction: number;
 }
 
@@ -46,6 +46,9 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
   const [comparing, setComparing] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Multi-shot: extra photos live only in memory; the fused result is saved with the project.
+  const [extraPhotos, setExtraPhotos] = useState<ExtraPhoto[]>([]);
+  const [fusionReport, setFusionReport] = useState<MultiShotInfo | null>(() => session.project.analysis?.multiShot ?? null);
   const viewerRef = useRef<ViewerHandle>(null);
 
   const commit: Commit = useCallback((fn, coalesce = false) => {
@@ -108,6 +111,8 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
           },
         };
       });
+      // A single-photo run replaces the unreviewed fused objects, so the fusion summary no longer applies.
+      setFusionReport(null);
       if (!circles.length) setNotice(t.none_found);
     } catch (e) {
       if (e instanceof CancelledError) {
@@ -121,6 +126,110 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
     }
   }, [hist.present.params, session.canvas, commit, onEngineLoaded, onError, t]);
 
+  const addExtraPhotos = useCallback(
+    async (files: File[]) => {
+      onError(null);
+      const room = Math.max(0, 4 - extraPhotos.length);
+      if (files.length > room) setNotice(t.ms_max);
+      const loaded: ExtraPhoto[] = [];
+      for (const file of files.slice(0, room)) {
+        try {
+          loaded.push({ name: file.name, canvas: (await loadImageFile(file, file.name)).canvas });
+        } catch (e) {
+          if (e instanceof ImageLoadError) onError(e.code === 'unsupported' ? t.err_unsupported : t.err_decode(file.name));
+          else onError(t.err_analysis(e instanceof Error ? e.message : String(e)));
+        }
+      }
+      setExtraPhotos((list) => [...list, ...loaded].slice(0, 4));
+    },
+    [extraPhotos.length, onError, t],
+  );
+
+  const runFusion = useCallback(async () => {
+    onError(null);
+    setNotice(null);
+    const params = hist.present.params;
+    setProgress({ phase: 'engine', fraction: 0 });
+    try {
+      await analysisClient.warmup();
+      onEngineLoaded();
+    } catch {
+      setProgress(null);
+      onError(t.err_engine);
+      return;
+    }
+    try {
+      setProgress({ phase: 'fuse', fraction: 0 });
+      const ref = analysisPixels(session.canvas, params.analysisMaxSide);
+      const others = extraPhotos.map((p) => analysisPixels(p.canvas, params.analysisMaxSide).image);
+      const manual = params.sizeMode === 'manual';
+      const { fusion, durationMs } = await analysisClient.fuse(
+        [ref.image, ...others],
+        {
+          sensitivity: params.sensitivity,
+          minRadius: manual ? params.minDiameterPx / 2 / ref.toProject : undefined,
+          maxRadius: manual ? params.maxDiameterPx / 2 / ref.toProject : undefined,
+        },
+        (f) => setProgress({ phase: 'fuse', fraction: f }),
+      );
+      const names = [hist.present.image.name, ...extraPhotos.map((p) => p.name)];
+      const info: MultiShotInfo = {
+        status: fusion.status,
+        photos: fusion.views.map((v) => ({
+          name: names[v.index] ?? `#${v.index + 1}`,
+          status: v.status,
+          reason: v.reason,
+          detections: v.detections,
+          inliers: v.inliers,
+          residualPx: Number.isFinite(v.residualPx) ? v.residualPx : 0,
+          agreement: v.agreement,
+          added: v.added,
+        })),
+        referenceCount: fusion.referenceCount,
+        countedTotal: fusion.countedTotal,
+        addedCount: fusion.addedCount,
+        flaggedCount: fusion.flaggedCount,
+        uncertainCount: fusion.uncertainCount,
+        droppedFromReference: fusion.droppedFromReference,
+      };
+      setFusionReport(info);
+      // Refused: the current result stays untouched — a fused one would not be more reliable.
+      if (fusion.status !== 'fused') return;
+      const k = ref.toProject;
+      const circles = fusion.objects.map((o) => ({
+        x: o.x * k,
+        y: o.y * k,
+        r: o.r * k,
+        score: o.score,
+        multiShot: { seenIn: o.seenIn, inFrame: o.inFrame, agreement: o.agreement },
+      }));
+      commit((p) => {
+        const objects = mergeDetections(p.objects, circles);
+        const grouped = applyGrouping(objects, p.groups, p.grouping);
+        const diam = circles.filter((c) => c.multiShot.agreement !== 'uncertain').map((c) => 2 * c.r).sort((a, b) => a - b);
+        return {
+          ...p,
+          ...grouped,
+          analysis: {
+            algorithm: 'circles-multiband-hough-v1 + orb-ransac-fusion-v1',
+            engine: 'OpenCV.js 5.0.0',
+            durationMs,
+            analysisWidth: ref.image.width,
+            analysisHeight: ref.image.height,
+            estimatedDiameterPx: diam.length ? [diam[Math.floor(diam.length * 0.05)]!, diam[Math.floor(diam.length * 0.95)]!] : null,
+            at: new Date().toISOString(),
+            multiShot: info,
+          },
+        };
+      });
+    } catch (e) {
+      if (e instanceof CancelledError) setNotice(t.cancelled);
+      else onError(t.err_analysis(e instanceof Error ? e.message : String(e)));
+    } finally {
+      setProgress(null);
+    }
+  }, [hist.present.params, hist.present.image.name, session.canvas, extraPhotos, commit, onEngineLoaded, onError, t]);
+
   // New photos are analysed immediately.
   const autoRan = useRef(false);
   useEffect(() => {
@@ -132,7 +241,7 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
 
   const stats = useMemo(() => computeStats(project), [project]);
   const numbers = useMemo(() => numbering(project.objects), [project.objects]);
-  const selected = project.objects.find((o) => o.id === selectedId && isCounted(o)) ?? null;
+  const selected = project.objects.find((o) => o.id === selectedId && isSelectable(o)) ?? null;
 
   const defaultRadius = (x: number, y: number): number => {
     const counted = project.objects.filter(isCounted);
@@ -249,7 +358,7 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
         {progress && (
           <div className="progress-overlay" role="status" aria-live="polite">
             <div className="progress-card">
-              <p>{progress.phase === 'engine' ? t.loading_engine : t.analyzing}</p>
+              <p>{progress.phase === 'engine' ? t.loading_engine : progress.phase === 'fuse' ? t.ms_analyzing : t.analyzing}</p>
               <progress value={progress.phase === 'engine' ? undefined : progress.fraction} max={1} />
               <button className="btn small" onClick={() => analysisClient.cancel()}>
                 {t.cancel}
@@ -317,6 +426,14 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
         <GroupsPanel project={project} stats={stats} commit={commit} />
         <CalibrationPanel project={project} commit={commit} />
         <SettingsPanel project={project} commit={commit} running={!!progress} onRun={() => runAnalysis()} />
+        <MultiShotPanel
+          photos={extraPhotos}
+          report={fusionReport}
+          running={!!progress}
+          onAdd={(files) => void addExtraPhotos(files)}
+          onRemove={(i) => setExtraPhotos((list) => list.filter((_, j) => j !== i))}
+          onRun={runFusion}
+        />
         <ExportPanel project={project} canvas={session.canvas} commit={commit} />
         <button className="btn ghost" onClick={onNewPhoto}>
           {t.new_photo}

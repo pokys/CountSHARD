@@ -621,3 +621,24 @@ input[type='range'] {
     display: none;
   }
 }
+
+/* multi-shot */
+.ms-list {
+  margin: 0.25rem 0 0.5rem;
+  padding-left: 1.25rem;
+}
+.ms-list li {
+  margin: 0.15rem 0;
+}
+.ms-name {
+  overflow-wrap: anywhere;
+}
+.ms-report {
+  border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+}
+label.btn.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}

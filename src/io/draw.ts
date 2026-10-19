@@ -3,7 +3,10 @@
  * The context must already be transformed so that 1 unit = 1 project-image pixel;
  * `pxPerUnit` converts desired on-screen line widths/fonts into image units.
  */
-import { type CountedObject, type SizeGroup, isCounted } from '../model/types';
+import { type CountedObject, type SizeGroup, isCandidate, isCounted, isMultiShotFlagged } from '../model/types';
+
+/** Multi-shot review colour (candidates and objects seen in few photos). */
+const REVIEW_COLOR = '#f59e0b';
 
 export interface DrawOptions {
   pxPerUnit: number;
@@ -21,8 +24,9 @@ export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedO
   const u = 1 / o.pxPerUnit;
   for (const obj of objects) {
     const counted = isCounted(obj);
-    if (!counted && !o.showRejected) continue;
-    const color = counted ? (obj.groupId && colors.get(obj.groupId)) || o.defaultColor || '#22c55e' : '#ef4444';
+    const candidate = isCandidate(obj);
+    if (!counted && !candidate && !o.showRejected) continue;
+    const color = candidate ? REVIEW_COLOR : counted ? (obj.groupId && colors.get(obj.groupId)) || o.defaultColor || '#22c55e' : '#ef4444';
     const selected = obj.id === o.selectedId;
     ctx.beginPath();
     ctx.arc(obj.x, obj.y, obj.r, 0, Math.PI * 2);
@@ -31,6 +35,26 @@ export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedO
     if (!counted) ctx.setLineDash([4 * u, 4 * u]);
     ctx.stroke();
     ctx.setLineDash([]);
+    if (candidate) {
+      // Multi-shot candidate: not counted, marked with "?" until the user decides.
+      const fontPx = Math.max(obj.r * 0.8, 10 * u);
+      ctx.font = `700 ${fontPx}px system-ui, -apple-system, Segoe UI, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = Math.max(fontPx / 5, 1.5 * u);
+      ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+      ctx.strokeText('?', obj.x, obj.y);
+      ctx.fillStyle = REVIEW_COLOR;
+      ctx.fillText('?', obj.x, obj.y);
+      if (selected) {
+        ctx.beginPath();
+        ctx.arc(obj.x, obj.y, obj.r + 4 * u, 0, Math.PI * 2);
+        ctx.lineWidth = 2 * u;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+      }
+      continue;
+    }
     if (!counted) {
       // Cross for a rejected detection.
       const d = obj.r * 0.5;
@@ -64,6 +88,18 @@ export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedO
       ctx.beginPath();
       ctx.arc(obj.x, obj.y, Math.max(1.5 * u, obj.r * 0.18), 0, Math.PI * 2);
       ctx.fillStyle = color;
+      ctx.fill();
+    }
+    if (o.reviewMarks && isMultiShotFlagged(obj)) {
+      // Seen in few of the photos: small amber triangle at the rim.
+      const s = Math.max(3 * u, obj.r * 0.2);
+      const cx = obj.x - obj.r * 0.7, cy = obj.y - obj.r * 0.7;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - s);
+      ctx.lineTo(cx + s, cy + s * 0.8);
+      ctx.lineTo(cx - s, cy + s * 0.8);
+      ctx.closePath();
+      ctx.fillStyle = REVIEW_COLOR;
       ctx.fill();
     }
     if (o.reviewMarks && obj.source === 'manual') {

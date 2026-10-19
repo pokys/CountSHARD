@@ -27,7 +27,10 @@ the browser.*
   engine running).
 - Czech UI, English included.
 
-Not yet: generic AI counting, multi-shot fusion — see [docs/roadmap.md](docs/roadmap.md).
+- Multi-shot: fuse 2–5 photos of the same bundle taken from nearly the same spot;
+  every object counts once and shows in how many photos it was seen.
+
+Not yet: generic AI counting — see [docs/roadmap.md](docs/roadmap.md).
 
 ## Run
 

@@ -25,8 +25,10 @@ single reference; multi-shot from substantially different angles; Live Scan.
 - Size classes: KDE mode finding in log-radius space (auto) or 1-D k-means (fixed k).
 - Generic AI (planned): detection-capable few-shot counter (GeCo-class) if its
   weights' licence allows, else LOCA density with an "estimate" workflow.
-- Multi-shot (planned): homography (ORB/RANSAC on the *whole scene* including the
-  bundle outline and surroundings) + Hungarian matching of detections + vote fusion.
+- Multi-shot (implemented): homography (ORB/RANSAC on the *whole scene* including the
+  bundle outline and surroundings) + one-to-one matching of detections (greedy with a
+  0.5·r gate — equivalent to Hungarian for non-overlapping objects) + majority vote;
+  see `testing.md` for the measured results.
 
 **6. Stack.** The proposed TypeScript + Vite + React + OpenCV.js + Workers + Workbox
 stack is appropriate and was kept. Changes: OpenCV is **bundled** into the worker

@@ -13,6 +13,15 @@ Status as of 2026-10-19.
 - **Phase 5 — multi-diameter:** automatic size classes, fixed-k mode, merge/split,
   manual reassignment that survives re-grouping, calibration from an object or a
   group's nominal diameter, spread warnings.
+- **Phase 6 — multi-shot (small viewpoint changes):** ORB + ratio test + RANSAC
+  homography of every extra photo onto the project photo, with refusal when the
+  registration is unreliable (too few inliers, low inlier ratio, poor coverage, high
+  residual, implausibly large viewpoint change) or when the mapped detections
+  disagree; one-to-one matching with a 0.5·r gate; per object "seen in k of n";
+  majority vote with "minority" (counted, flagged) and "uncertain" (not counted until
+  confirmed) objects. Acceptance test met on the synthetic set: fused count = ground
+  truth with zero duplicates, and a photo of a different scene is refused
+  (`tests/unit/multishot.test.ts`; results in `testing.md`). Real photos not tested.
 
 ## Next
 
@@ -21,16 +30,10 @@ Status as of 2026-10-19.
    enough: count with the app, fix every error by hand, export JSON). Re-tune the
    detector on it; add it to `npm run eval`.
 2. **Playwright E2E** for import → detect → correct → export and offline reload.
-3. **Phase 6 — Multi-shot (small viewpoint changes)**
-   - ORB features + RANSAC homography between each photo and a reference photo,
-     using the whole frame (pipe faces alone are too self-similar to match reliably);
-   - detections mapped to the reference, Hungarian matching with a distance gate
-     relative to radius;
-   - fused result: an object counts once; per object "seen in k of n photos";
-     inconsistent regions highlighted for review;
-   - acceptance test: synthetic scene rendered with 2–5 small homographies + noise;
-     fused count must equal ground truth with **zero duplicates**; if registration
-     residual is too high, the app must refuse to fuse and say so.
+3. **Multi-shot follow-ups:** evaluate on real photo series (same set as item 1,
+   2–3 shots each); keep extra photos with the project (currently memory only);
+   re-run fusion automatically when the sensitivity changes (today a single-photo
+   re-analysis replaces the fused result).
 4. **Phase 4 — Generic AI counting** (blocked on a licence decision)
    - LOCA weights inherit a non-commercial SwAV backbone (CC BY-NC 4.0) — needs an
      owner decision or a model with clear weights licensing;

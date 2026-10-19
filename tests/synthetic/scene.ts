@@ -4,6 +4,7 @@
  */
 import type { CV } from '../../src/analysis/cv';
 import type { GrayImage } from '../../src/analysis/circles';
+import { type Mat3, apply3, localScale3, mul3 } from '../../src/analysis/homography';
 
 export interface GtCircle {
   x: number;
@@ -157,4 +158,132 @@ export function makeScene(cv: CV, spec: SceneSpec): Scene {
   } finally {
     mat.delete();
   }
+}
+
+// --- multi-view rendering (Phase 6: multi-shot fusion) -----------------------
+
+export interface MultiViewSpec {
+  /** Number of photos, 2–5. View 0 is the reference. */
+  views: number;
+  /** Max translation as a fraction of the longer side (default 0.025). */
+  maxShift?: number;
+  /** Max in-plane rotation in degrees (default 2). */
+  maxRotDeg?: number;
+  /** Max relative scale change (default 0.03). */
+  maxScale?: number;
+  /** Max perspective coefficient times the longer side (default 0.02). */
+  maxPersp?: number;
+  /** Draw one occluding bar at a random place in every view (default true). */
+  occluder?: boolean;
+  /** Independent per-view noise sigma (default: the scene's noiseSigma). */
+  noiseSigma?: number;
+  seed: number;
+}
+
+export interface SceneView {
+  image: GrayImage;
+  /** World → this view. */
+  H: Mat3;
+  /** Objects visible in this view, in view coordinates; `id` indexes `worldTruth`. */
+  truth: (GtCircle & { id: number })[];
+}
+
+export interface MultiViewScene {
+  worldTruth: GtCircle[];
+  views: SceneView[];
+  /** Objects visible in at least one view, in reference (view 0) coordinates — what fusion must count. */
+  fusedTruth: (GtCircle & { id: number })[];
+}
+
+/**
+ * Renders one scene as 2–5 photos from nearly the same viewpoint: the stack is
+ * padded with textured surroundings (as real photos have), then every view gets
+ * its own small homography (shift, rotation, scale, slight perspective), its own
+ * occluding bar and independent noise.
+ */
+export function makeMultiViewScene(cv: CV, spec: SceneSpec, mv: MultiViewSpec): MultiViewScene {
+  const R = rng(mv.seed * 7919 + 17);
+  const base = makeScene(cv, { ...spec, noiseSigma: 0, occluder: false });
+  const pad = Math.round(0.08 * Math.max(spec.width, spec.height));
+  const W = spec.width + 2 * pad, Hh = spec.height + 2 * pad;
+  const worldTruth = base.truth.map((t) => ({ ...t, x: t.x + pad, y: t.y + pad }));
+
+  const world = new cv.Mat(Hh, W, cv.CV_8UC1, new cv.Scalar(35));
+  const views: SceneView[] = [];
+  try {
+    // Surroundings: clutter in the padding so the frame has non-repetitive structure.
+    for (let i = 0; i < 70; i++) {
+      const p1 = new cv.Point(Math.round(R.next() * W), Math.round(R.next() * Hh));
+      const p2 = new cv.Point(Math.round(p1.x + (R.next() - 0.5) * 300), Math.round(p1.y + (R.next() - 0.5) * 300));
+      cv.line(world, p1, p2, new cv.Scalar(60 + R.next() * 150), 1 + Math.round(R.next() * 5), cv.LINE_AA);
+    }
+    for (let i = 0; i < 30; i++) {
+      const x = Math.round(R.next() * W), y = Math.round(R.next() * Hh);
+      cv.rectangle(world, new cv.Point(x, y), new cv.Point(x + 10 + R.next() * 60, y + 10 + R.next() * 60), new cv.Scalar(40 + R.next() * 180), -1);
+    }
+    const stack = new cv.Mat(spec.height, spec.width, cv.CV_8UC1);
+    stack.data.set(base.image.data);
+    const inner = world.roi(new cv.Rect(pad, pad, spec.width, spec.height));
+    stack.copyTo(inner);
+    inner.delete();
+    stack.delete();
+
+    const L = Math.max(W, Hh);
+    const cx = W / 2, cy = Hh / 2;
+    const maxShift = (mv.maxShift ?? 0.025) * L;
+    const maxRot = ((mv.maxRotDeg ?? 2) * Math.PI) / 180;
+    const maxScale = mv.maxScale ?? 0.03;
+    const maxPersp = (mv.maxPersp ?? 0.02) / L;
+    const ns = mv.noiseSigma ?? spec.noiseSigma ?? 0;
+    const sym = () => 2 * R.next() - 1;
+
+    for (let v = 0; v < mv.views; v++) {
+      const a = sym() * maxRot, s = 1 + sym() * maxScale;
+      const tx = sym() * maxShift, ty = sym() * maxShift;
+      const T1: Mat3 = [1, 0, -cx, 0, 1, -cy, 0, 0, 1];
+      const P: Mat3 = [1, 0, 0, 0, 1, 0, sym() * maxPersp, sym() * maxPersp, 1];
+      const RS: Mat3 = [s * Math.cos(a), -s * Math.sin(a), 0, s * Math.sin(a), s * Math.cos(a), 0, 0, 0, 1];
+      const T2: Mat3 = [1, 0, cx + tx, 0, 1, cy + ty, 0, 0, 1];
+      const H = mul3(T2, mul3(RS, mul3(P, T1)));
+
+      const out = new cv.Mat();
+      const Hm = cv.matFromArray(3, 3, cv.CV_64F, H);
+      cv.warpPerspective(world, out, Hm, new cv.Size(W, Hh), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
+      Hm.delete();
+
+      const truth: SceneView['truth'] = [];
+      worldTruth.forEach((t, id) => {
+        const [x, y] = apply3(H, t.x, t.y);
+        const r = t.r * localScale3(H, t.x, t.y);
+        if (x - r < 0 || y - r < 0 || x + r > W || y + r > Hh) return;
+        truth.push({ x, y, r, cls: t.cls, id });
+      });
+
+      let visible = truth;
+      if (mv.occluder ?? true) {
+        const bw = 0.07 * spec.width;
+        const x0 = pad + R.next() * (spec.width - bw), x1 = x0 + bw;
+        cv.rectangle(out, new cv.Point(Math.round(x0), 0), new cv.Point(Math.round(x1), Hh), new cv.Scalar(90), -1);
+        visible = truth.filter((t) => Math.max(0, Math.min(t.x + t.r, x1) - Math.max(t.x - t.r, x0)) / (2 * t.r) < 0.5);
+      }
+
+      const data = new Uint8Array(out.data);
+      out.delete();
+      if (ns) for (let i = 0; i < data.length; i++) data[i] = Math.max(0, Math.min(255, Math.round(data[i]! + R.gauss() * ns)));
+      views.push({ image: { data, width: W, height: Hh }, H, truth: visible });
+    }
+  } finally {
+    world.delete();
+  }
+
+  const seen = new Set(views.flatMap((v) => v.truth.map((t) => t.id)));
+  const H0 = views[0]!.H;
+  const fusedTruth = worldTruth.flatMap((t, id) => {
+    if (!seen.has(id)) return [];
+    const [x, y] = apply3(H0, t.x, t.y);
+    const r = t.r * localScale3(H0, t.x, t.y);
+    if (x < 0 || y < 0 || x > W || y > Hh) return [];
+    return [{ x, y, r, cls: t.cls, id }];
+  });
+  return { worldTruth, views, fusedTruth };
 }
