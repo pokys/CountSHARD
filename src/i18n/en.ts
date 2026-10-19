@@ -113,6 +113,8 @@ export const en: typeof cs = {
   radius: 'Size',
   settings_title: 'Detection settings',
   sensitivity: 'Sensitivity',
+  sens_less: 'fewer',
+  sens_more: 'more',
   sensitivity_hint: 'Higher sensitivity finds fainter ends but adds more false hits.',
   size_mode: 'Object size',
   size_auto: 'Automatic',

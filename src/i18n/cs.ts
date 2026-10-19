@@ -121,6 +121,8 @@ export const cs = {
   // settings
   settings_title: 'Nastavení detekce',
   sensitivity: 'Citlivost',
+  sens_less: 'méně',
+  sens_more: 'více',
   sensitivity_hint: 'Vyšší citlivost najde i méně zřetelná čela, ale přidá víc chybných nálezů.',
   size_mode: 'Velikost objektů',
   size_auto: 'Automaticky',

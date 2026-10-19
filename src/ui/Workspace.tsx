@@ -60,10 +60,13 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
     return () => clearTimeout(id);
   }, [project, onError, t]);
 
-  const runAnalysis = useCallback(async () => {
+  // Set when a newer run supersedes the current one, so its cancellation is not reported.
+  const superseded = useRef(false);
+
+  const runAnalysis = useCallback(async (override?: Partial<Project['params']>) => {
     onError(null);
     setNotice(null);
-    const params = hist.present.params;
+    const params = { ...hist.present.params, ...override };
     setProgress({ phase: 'engine', fraction: 0 });
     try {
       await analysisClient.warmup();
@@ -107,7 +110,11 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
       });
       if (!circles.length) setNotice(t.none_found);
     } catch (e) {
-      if (e instanceof CancelledError) setNotice(t.cancelled);
+      if (e instanceof CancelledError) {
+        if (!superseded.current) setNotice(t.cancelled);
+        superseded.current = false;
+        return;
+      }
       else onError(t.err_analysis(e instanceof Error ? e.message : String(e)));
     } finally {
       setProgress(null);
@@ -175,6 +182,24 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  // Sensitivity slider under the photo: re-counts shortly after the user stops moving it.
+  const [sens, setSens] = useState(project.params.sensitivity);
+  useEffect(() => setSens(project.params.sensitivity), [project.params.sensitivity]);
+  const sensTimer = useRef<ReturnType<typeof setTimeout>>();
+  const onSensitivity = (v: number) => {
+    setSens(v);
+    clearTimeout(sensTimer.current);
+    sensTimer.current = setTimeout(() => {
+      commit((p) => ({ ...p, params: { ...p.params, sensitivity: v } }));
+      if (progress) {
+        superseded.current = true;
+        analysisClient.cancel();
+      }
+      void runAnalysis({ sensitivity: v });
+    }, 450);
+  };
+  useEffect(() => () => clearTimeout(sensTimer.current), []);
+
   const confirmAll = () =>
     commit((p) => ({ ...p, objects: setReview(p.objects, p.objects.filter((o) => isCounted(o)).map((o) => o.id), 'confirmed') }));
 
@@ -208,6 +233,7 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
             </button>
           </div>
         </div>
+        <div className="viewer-wrap">
         <Viewer
           ref={viewerRef}
           image={session.canvas}
@@ -220,6 +246,37 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
           showRejected={showRejected}
           {...handlers}
         />
+        {progress && (
+          <div className="progress-overlay" role="status" aria-live="polite">
+            <div className="progress-card">
+              <p>{progress.phase === 'engine' ? t.loading_engine : t.analyzing}</p>
+              <progress value={progress.phase === 'engine' ? undefined : progress.fraction} max={1} />
+              <button className="btn small" onClick={() => analysisClient.cancel()}>
+                {t.cancel}
+              </button>
+            </div>
+          </div>
+        )}
+        </div>
+        <div className="sensbar">
+          <label htmlFor="sens-quick">{t.sensitivity}</label>
+          <span className="tiny muted-dark">{t.sens_less}</span>
+          <input
+            id="sens-quick"
+            type="range"
+            min={0}
+            max={100}
+            value={sens}
+            onChange={(e) => onSensitivity(Number(e.target.value))}
+            aria-describedby="sens-quick-hint"
+            data-testid="sens-quick"
+          />
+          <span className="tiny muted-dark">{t.sens_more}</span>
+          <output htmlFor="sens-quick">{sens}</output>
+          <span id="sens-quick-hint" hidden>
+            {t.sensitivity_hint} {t.rerun_hint}
+          </span>
+        </div>
         <div className="toolbar bottom">
           <span className="hint">{tool === 'edit' ? t.tool_edit_hint : t.tool_select_hint}</span>
           <div className="row">
@@ -243,17 +300,6 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
             </button>
           </div>
         </div>
-        {progress && (
-          <div className="progress-overlay" role="status" aria-live="polite">
-            <div className="progress-card">
-              <p>{progress.phase === 'engine' ? t.loading_engine : t.analyzing}</p>
-              <progress value={progress.phase === 'engine' ? undefined : progress.fraction} max={1} />
-              <button className="btn small" onClick={() => analysisClient.cancel()}>
-                {t.cancel}
-              </button>
-            </div>
-          </div>
-        )}
       </section>
 
       <aside className="side">
@@ -270,7 +316,7 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
         )}
         <GroupsPanel project={project} stats={stats} commit={commit} />
         <CalibrationPanel project={project} commit={commit} />
-        <SettingsPanel project={project} commit={commit} running={!!progress} onRun={runAnalysis} />
+        <SettingsPanel project={project} commit={commit} running={!!progress} onRun={() => runAnalysis()} />
         <ExportPanel project={project} canvas={session.canvas} commit={commit} />
         <button className="btn ghost" onClick={onNewPhoto}>
           {t.new_photo}
