@@ -31,13 +31,21 @@ export function newId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}${idCounter.toString(36)}`;
 }
 
+/** Camera apps name every photo "image.jpg", "IMG_1234.JPG", …; such names are replaced by the date. */
+export function projectName(fileName: string, now = new Date()): string {
+  const base = fileName.replace(/\.[^.]+$/, '').trim();
+  if (base && !/^(image|photo|img|dsc|pxl|dcim|foto)[\s_-]?\d*([_-]\d+)*$/i.test(base)) return base;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `Foto ${now.getDate()}. ${now.getMonth() + 1}. ${p(now.getHours())}:${p(now.getMinutes())}`;
+}
+
 export function createProject(image: Project['image']): Project {
   const now = new Date().toISOString();
   return {
     format: 'countshard-project',
     version: 1,
     id: newId('p'),
-    name: image.name.replace(/\.[^.]+$/, '') || 'Projekt',
+    name: projectName(image.name),
     createdAt: now,
     updatedAt: now,
     image,

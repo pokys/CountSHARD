@@ -604,21 +604,120 @@ input[type='range'] {
   border-color: var(--focus);
 }
 
+/* action bar right under the photo */
+.quickbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 12px 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+.quickbar .btn {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+.quickbar .btn.primary {
+  background: #22c55e;
+  border-color: #22c55e;
+  color: #052e16;
+}
+.qb-total {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 4px 0 0;
+  margin-right: auto;
+  font-size: 0.95rem;
+}
+.qb-num {
+  font-size: 1.6rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #22c55e;
+  color: #052e16;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+/* selected object strip over the photo */
+.selbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #1e293b;
+  border-top: 2px solid #3b82f6;
+  color: #e2e8f0;
+}
+.selbar .btn,
+.selbar select {
+  min-height: 36px;
+  padding: 4px 8px;
+}
+.selbar-title {
+  font-weight: 700;
+  margin-right: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.selbar select {
+  min-height: 36px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+.selbar .btn {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+.selbar .btn.danger {
+  color: #fca5a5;
+  border-color: #f87171;
+}
+.btn.big {
+  min-height: 52px;
+  padding: 10px 24px;
+  font-size: 1.1rem;
+}
+.camera-first {
+  flex-direction: row-reverse;
+  flex-wrap: wrap-reverse;
+}
+
 @media (max-width: 860px) {
   .workspace {
     grid-template-columns: 1fr;
     height: auto;
   }
   .stage {
-    height: 68dvh;
-    min-height: 360px;
+    height: auto;
+  }
+  /* Photo area follows the photo's aspect ratio instead of a fixed, mostly empty band. */
+  .viewer-wrap {
+    flex: none;
+    height: clamp(220px, calc(100vw * var(--img-ratio, 0.75)), 62dvh);
   }
   .side {
     border-left: 0;
     overflow: visible;
   }
   .toolbar.bottom .hint {
-    display: none;
+    flex-basis: 100%;
+    font-size: 0.8rem;
   }
 }
 

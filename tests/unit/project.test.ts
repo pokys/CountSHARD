@@ -11,6 +11,7 @@ import {
   mergeDetections,
   mergeGroups,
   numbering,
+  projectName,
   hitTest,
   removeGroup,
   removeObject,
@@ -166,6 +167,15 @@ describe('calibration', () => {
     expect(cal.mmPerPx).toBeCloseTo(26.9 / 20);
     const stats = computeStats({ ...g, calibration: cal });
     expect(stats.groups[0]!.medianDiameterMm).toBeCloseTo(26.9);
+  });
+});
+
+describe('projectName', () => {
+  it('keeps meaningful file names and replaces camera defaults by the date', () => {
+    const d = new Date(2026, 9, 20, 7, 5);
+    expect(projectName('sklad A – trubky 26,9.jpg', d)).toBe('sklad A – trubky 26,9');
+    for (const n of ['image.jpg', 'IMG_1234.JPG', 'PXL_20261019_123456.jpg', 'DSC01234.jpeg', 'photo.png'])
+      expect(projectName(n, d)).toBe('Foto 20. 10. 07:05');
   });
 });
 

@@ -13,6 +13,7 @@ import {
   mergeDetections,
   numbering,
   removeObject,
+  setObjectGroup,
   setReview,
   updateObject,
 } from '../state/project';
@@ -35,7 +36,7 @@ interface Progress {
 }
 
 export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Props) {
-  const { t } = useI18n();
+  const { t, fmt } = useI18n();
   const [hist, setHist] = useState<History<Project>>(() => initHistory(session.project));
   const project = hist.present;
   const [tool, setTool] = useState<Tool>('edit');
@@ -50,6 +51,8 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
   const [extraPhotos, setExtraPhotos] = useState<ExtraPhoto[]>([]);
   const [fusionReport, setFusionReport] = useState<MultiShotInfo | null>(() => session.project.analysis?.multiShot ?? null);
   const viewerRef = useRef<ViewerHandle>(null);
+  const moreRef = useRef<HTMLInputElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
 
   const commit: Commit = useCallback((fn, coalesce = false) => {
     setHist((h) => push(h, { ...fn(h.present), updatedAt: new Date().toISOString() }, coalesce));
@@ -314,7 +317,7 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
 
   return (
     <main className="workspace">
-      <section className="stage">
+      <section className="stage" style={{ ["--img-ratio" as string]: String(session.canvas.height / session.canvas.width) }}>
         <div className="toolbar" role="toolbar">
           <div className="seg" role="radiogroup">
             <button className={tool === 'edit' ? 'on' : ''} onClick={() => setTool('edit')} role="radio" aria-checked={tool === 'edit'}>
@@ -367,6 +370,37 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
           </div>
         )}
         </div>
+        {selected && tool === 'select' && !progress && (
+          <div className="selbar" role="group" aria-label={t.selected}>
+            <span className="selbar-title">
+              {t.sel_title(numbers.get(selected.id) ?? 0, project.calibration ? `${fmt(2 * selected.r * project.calibration.mmPerPx, 1)} mm` : `${fmt(2 * selected.r, 0)} px`)}
+            </span>
+            {project.groups.length > 1 && (
+              <select
+                aria-label={t.group}
+                value={selected.groupId ?? ''}
+                onChange={(e) => e.target.value && commit((p) => ({ ...p, objects: setObjectGroup(p.objects, [selected.id], e.target.value) }))}
+              >
+                {project.groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            {selected.review !== 'confirmed' && (
+              <button className="btn small" onClick={() => commit((p) => ({ ...p, objects: setReview(p.objects, [selected.id], 'confirmed') }))}>
+                {t.confirm}
+              </button>
+            )}
+            <button className="btn small danger" onClick={() => handlers.onRemove(selected.id)}>
+              {t.remove}
+            </button>
+            <button className="icon" onClick={() => setSelectedId(null)} aria-label={t.sel_close} title={t.sel_close}>
+              ×
+            </button>
+          </div>
+        )}
         <div className="sensbar">
           <label htmlFor="sens-quick">{t.sensitivity}</label>
           <span className="tiny muted-dark">{t.sens_less}</span>
@@ -385,6 +419,38 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
           <span id="sens-quick-hint" hidden>
             {t.sensitivity_hint} {t.rerun_hint}
           </span>
+        </div>
+        <div className="quickbar">
+          <button className="qb-total" onClick={() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} aria-label={t.qb_total}>
+            <span className="qb-num" data-testid="quick-total">{stats.total}</span> {t.pcs}
+          </button>
+          <button
+            className="btn small"
+            disabled={!!progress || extraPhotos.length >= 4}
+            onClick={() => moreRef.current?.click()}
+            title={t.qb_more_photo_hint}
+            data-testid="quick-more-photo"
+          >
+            📷 {t.qb_more_photo}
+            {extraPhotos.length > 0 && <span className="badge">{extraPhotos.length}</span>}
+          </button>
+          {extraPhotos.length > 0 && (
+            <button className="btn small primary" disabled={!!progress} onClick={runFusion} data-testid="quick-fuse">
+              {t.qb_fuse(extraPhotos.length + 1)}
+            </button>
+          )}
+          <input
+            ref={moreRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            onChange={(e) => {
+              const files = [...(e.target.files ?? [])];
+              e.target.value = '';
+              if (files.length) void addExtraPhotos(files);
+            }}
+          />
         </div>
         <div className="toolbar bottom">
           <span className="hint">{tool === 'edit' ? t.tool_edit_hint : t.tool_select_hint}</span>
@@ -413,7 +479,9 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
 
       <aside className="side">
         {notice && <div className="banner info">{notice}</div>}
-        <ResultPanel stats={stats} onConfirmAll={confirmAll} />
+        <div ref={resultRef}>
+          <ResultPanel stats={stats} onConfirmAll={confirmAll} />
+        </div>
         {selected && (
           <SelectedPanel
             obj={selected}

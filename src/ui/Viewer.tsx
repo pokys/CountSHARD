@@ -46,6 +46,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const view = useRef<View>({ s: 1, tx: 0, ty: 0 });
+  /** Scale of the "whole photo" view; at (about) this scale vertical swipes scroll the page. */
+  const fitScale = useRef(1);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture>({ kind: 'none' });
   const propsRef = useRef(props);
@@ -66,6 +68,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       canvas.height = Math.round(ch * dpr);
     }
     const ctx = canvas.getContext('2d')!;
+    // Not zoomed in: let a vertical swipe scroll the page (phones), otherwise the photo
+    // would capture every swipe. Zoomed in: all gestures pan/zoom the photo.
+    const zoomed = view.current.s > fitScale.current * 1.02;
+    canvas.style.touchAction = zoomed ? 'none' : 'pan-y';
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#0b1220';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -106,6 +112,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     if (!wrap) return;
     const { width: iw, height: ih } = propsRef.current.image;
     const s = Math.min(wrap.clientWidth / iw, wrap.clientHeight / ih) * 0.98;
+    fitScale.current = s;
     view.current = { s, tx: (wrap.clientWidth - iw * s) / 2, ty: (wrap.clientHeight - ih * s) / 2 };
     requestDraw();
   }, [requestDraw]);
@@ -136,10 +143,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   useEffect(() => requestDraw());
   useEffect(() => {
     const wrap = wrapRef.current!;
-    const ro = new ResizeObserver(() => requestDraw());
+    const ro = new ResizeObserver(() => {
+      // Keep showing the whole photo when the area resizes, unless the user zoomed in.
+      if (view.current.s <= fitScale.current * 1.02) fit();
+      else requestDraw();
+    });
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [requestDraw]);
+  }, [requestDraw, fit]);
 
   const toImage = (clientX: number, clientY: number) => {
     const rect = canvasRef.current!.getBoundingClientRect();

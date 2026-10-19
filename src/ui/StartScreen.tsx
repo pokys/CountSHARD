@@ -15,6 +15,8 @@ interface Props {
 export function StartScreen({ busy, recent, onFile, onDemo, onOpen, onDelete, onImport }: Props) {
   const { t, lang } = useI18n();
   const [drag, setDrag] = useState(false);
+  // Phones/tablets: the camera is the main way in, drag & drop does not exist.
+  const touch = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
@@ -49,13 +51,13 @@ export function StartScreen({ busy, recent, onFile, onDemo, onOpen, onDelete, on
           <circle cx="11" cy="15" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
           <circle cx="19" cy="15" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
         </svg>
-        <h1>{t.drop_title}</h1>
-        <p className="muted">{t.drop_hint}</p>
-        <div className="row wrap center">
-          <button className="btn primary" disabled={busy} onClick={() => fileRef.current?.click()}>
+        <h1>{touch ? t.drop_title_touch : t.drop_title}</h1>
+        <p className="muted">{touch ? t.drop_hint_touch : t.drop_hint}</p>
+        <div className={`row wrap center${touch ? ' camera-first' : ''}`}>
+          <button className={`btn ${touch ? '' : 'primary'}`} disabled={busy} onClick={() => fileRef.current?.click()}>
             {t.pick_file}
           </button>
-          <button className="btn" disabled={busy} onClick={() => camRef.current?.click()}>
+          <button className={`btn ${touch ? 'primary big' : ''}`} disabled={busy} onClick={() => camRef.current?.click()}>
             {t.take_photo}
           </button>
           <button className="btn ghost" disabled={busy} onClick={onDemo}>
