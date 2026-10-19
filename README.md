@@ -77,7 +77,13 @@ accuracy; dense tiny objects and heavy noise are weaker. **It has not yet been
 evaluated on real photographs** — see [docs/testing.md](docs/testing.md). Always
 check the marked image before relying on a count.
 
+## Deployment
+
+Every push to `main` runs the tests, builds the app and publishes it to GitHub Pages
+(`.github/workflows/pages.yml`). In the repository settings, *Pages → Source* must be
+set to **GitHub Actions**. Pages serves over HTTPS, so the service worker and offline
+mode work from the published link.
+
 ## Licence
 
-Not yet chosen by the project owner. Third-party components: see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Third-party components: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
