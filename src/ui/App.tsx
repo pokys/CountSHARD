@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
 import type { Project } from '../model/types';
-import { createProject } from '../state/project';
+import { createProject, relabel } from '../state/project';
 import { ImageLoadError, blobToCanvas, loadImageFile } from '../io/image';
 import { deleteProject, listProjects, loadProject, requestPersistence, saveProject, type ProjectSummary } from '../io/db';
 import { dataUrlToBlob } from '../io/export';
@@ -18,6 +18,11 @@ export interface Session {
   imageBlob: Blob;
   /** Run automatic analysis right after opening (new photos only). */
   autoAnalyze: boolean;
+}
+
+/** Brings projects saved by older versions up to date (e.g. group colours that are now reserved). */
+function normalize(p: Project): Project {
+  return { ...p, groups: relabel(p.objects, p.groups) };
 }
 
 export function App() {
@@ -72,7 +77,7 @@ export function App() {
     const loaded = await loadProject(id);
     if (!loaded) return;
     const canvas = await blobToCanvas(loaded.image);
-    setSession({ project: loaded.project, canvas, imageBlob: loaded.image, autoAnalyze: false });
+    setSession({ project: normalize(loaded.project), canvas, imageBlob: loaded.image, autoAnalyze: false });
   };
 
   const importProject = async (file: File) => {
@@ -83,7 +88,7 @@ export function App() {
       const canvas = await blobToCanvas(blob);
       const project = { ...f.project, updatedAt: new Date().toISOString() };
       await saveProject(project, blob).catch(() => setError(t.err_storage));
-      setSession({ project, canvas, imageBlob: blob, autoAnalyze: false });
+      setSession({ project: normalize(project), canvas, imageBlob: blob, autoAnalyze: false });
     } catch (e) {
       setError(t.err_import(e instanceof ProjectFileError ? e.message : String(e)));
     }

@@ -5,6 +5,8 @@ import {
   calibrateFromGroup,
   calibrateFromObject,
   computeStats,
+  GROUP_COLORS,
+  RESERVED_COLORS,
   createProject,
   mergeDetections,
   mergeGroups,
@@ -132,6 +134,26 @@ describe('grouping', () => {
     const split = splitGroup(merged.objects, merged.groups, merged.groups[0]!.id);
     expect(split.groups).toHaveLength(2);
     expect(computeStats({ ...split, calibration: null }).groups.map((s) => s.count).sort()).toEqual([10, 20]);
+  });
+});
+
+describe('group colours', () => {
+  it('never use the reserved review/rejected colours', () => {
+    const reserved = [RESERVED_COLORS.review, RESERVED_COLORS.rejected, '#f97316'];
+    expect(GROUP_COLORS.some((c) => reserved.includes(c))).toBe(false);
+    // 12 distinct size groups: every one still avoids the reserved colours.
+    const objects = mergeDetections([], Array.from({ length: 36 }, (_, i) => circle(i * 200, 0, 10 * Math.pow(1.3, Math.floor(i / 3)))));
+    const g = applyGrouping(objects, [], DEFAULT_GROUPING);
+    expect(g.groups.length).toBeGreaterThan(5);
+    expect(g.groups.some((x) => reserved.includes(x.color))).toBe(false);
+  });
+
+  it('recolours a group saved with a reserved colour', () => {
+    const g = applyGrouping(mergeDetections([], [circle(0, 0), circle(30, 0), circle(60, 0)]), [], DEFAULT_GROUPING);
+    const legacy = g.groups.map((x) => ({ ...x, color: '#f59e0b' }));
+    const again = applyGrouping(g.objects, legacy, DEFAULT_GROUPING);
+    expect(again.groups[0]!.id).toBe(legacy[0]!.id);
+    expect(again.groups[0]!.color).not.toBe('#f59e0b');
   });
 });
 

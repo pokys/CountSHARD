@@ -19,7 +19,11 @@ import {
 
 export const APP_VERSION = '0.1.0';
 
-export const GROUP_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ec4899', '#14b8a6', '#a855f7', '#ef4444', '#84cc16', '#06b6d4', '#f97316'];
+/** Colours with a fixed meaning in the overlay; size groups must never use them (or look-alikes). */
+export const RESERVED_COLORS = { review: '#f59e0b', rejected: '#ef4444' } as const;
+const RESERVED_LOOKALIKES = new Set<string>([RESERVED_COLORS.review, RESERVED_COLORS.rejected, '#f97316']);
+
+export const GROUP_COLORS = ['#22c55e', '#3b82f6', '#ec4899', '#14b8a6', '#a855f7', '#84cc16', '#06b6d4', '#6366f1', '#d946ef', '#cbd5e1'];
 
 let idCounter = 0;
 export function newId(prefix: string): string {
@@ -133,7 +137,7 @@ export function applyGrouping(objects: CountedObject[], groups: SizeGroup[], gro
 }
 
 function unusedColor(groups: SizeGroup[]): string {
-  const taken = new Set(groups.map((g) => g.color));
+  const taken = new Set(groups.map((g) => g.color.toLowerCase()));
   return GROUP_COLORS.find((c) => !taken.has(c)) ?? GROUP_COLORS[groups.length % GROUP_COLORS.length]!;
 }
 
@@ -144,7 +148,10 @@ export function relabel(objects: CountedObject[], groups: SizeGroup[]): SizeGrou
     .map((g) => ({ g, m: median(counted.filter((o) => o.groupId === g.id).map((o) => o.r)) }))
     .filter((x) => !Number.isNaN(x.m))
     .sort((a, b) => a.m - b.m);
-  return withSize.map(({ g }, i) => ({ ...g, label: groupLabel(i) }));
+  // Groups saved before the palette change may still carry a reserved colour; recolour them.
+  const out = withSize.map(({ g }, i) => ({ ...g, label: groupLabel(i) }));
+  for (const g of out) if (RESERVED_LOOKALIKES.has(g.color.toLowerCase())) g.color = unusedColor(out);
+  return out;
 }
 
 export function groupLabel(i: number): string {

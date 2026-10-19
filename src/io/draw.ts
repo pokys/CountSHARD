@@ -3,10 +3,11 @@
  * The context must already be transformed so that 1 unit = 1 project-image pixel;
  * `pxPerUnit` converts desired on-screen line widths/fonts into image units.
  */
+import { RESERVED_COLORS } from '../state/project';
 import { type CountedObject, type SizeGroup, isCandidate, isCounted, isMultiShotFlagged } from '../model/types';
 
 /** Multi-shot review colour (candidates and objects seen in few photos). */
-const REVIEW_COLOR = '#f59e0b';
+const REVIEW_COLOR = RESERVED_COLORS.review;
 
 export interface DrawOptions {
   pxPerUnit: number;
@@ -26,7 +27,7 @@ export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedO
     const counted = isCounted(obj);
     const candidate = isCandidate(obj);
     if (!counted && !candidate && !o.showRejected) continue;
-    const color = candidate ? REVIEW_COLOR : counted ? (obj.groupId && colors.get(obj.groupId)) || o.defaultColor || '#22c55e' : '#ef4444';
+    const color = candidate ? REVIEW_COLOR : counted ? (obj.groupId && colors.get(obj.groupId)) || o.defaultColor || '#22c55e' : RESERVED_COLORS.rejected;
     const selected = obj.id === o.selectedId;
     ctx.beginPath();
     ctx.arc(obj.x, obj.y, obj.r, 0, Math.PI * 2);
