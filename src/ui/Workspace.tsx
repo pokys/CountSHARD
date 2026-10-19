@@ -1,0 +1,282 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useI18n } from '../i18n';
+import { type Project, isCounted } from '../model/types';
+import { median } from '../analysis/clustering';
+import { CancelledError, analysisClient } from '../analysis/client';
+import { analysisPixels } from '../io/image';
+import { saveProject } from '../io/db';
+import { initHistory, push, redo, undo, type History } from '../state/history';
+import {
+  addManualObject,
+  applyGrouping,
+  computeStats,
+  mergeDetections,
+  numbering,
+  removeObject,
+  setReview,
+  updateObject,
+} from '../state/project';
+import type { Session } from './App';
+import { Viewer, type Tool, type ViewerHandle } from './Viewer';
+import { CalibrationPanel, ExportPanel, GroupsPanel, ResultPanel, SelectedPanel, SettingsPanel } from './Panels';
+
+interface Props {
+  session: Session;
+  onEngineLoaded(): void;
+  onError(msg: string | null): void;
+  onNewPhoto(): void;
+}
+
+export type Commit = (fn: (p: Project) => Project, coalesce?: boolean) => void;
+
+interface Progress {
+  phase: 'engine' | 'detect';
+  fraction: number;
+}
+
+export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Props) {
+  const { t } = useI18n();
+  const [hist, setHist] = useState<History<Project>>(() => initHistory(session.project));
+  const project = hist.present;
+  const [tool, setTool] = useState<Tool>('edit');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [showNumbers, setShowNumbers] = useState(true);
+  const [showRejected, setShowRejected] = useState(false);
+  const [comparing, setComparing] = useState(false);
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const viewerRef = useRef<ViewerHandle>(null);
+
+  const commit: Commit = useCallback((fn, coalesce = false) => {
+    setHist((h) => push(h, { ...fn(h.present), updatedAt: new Date().toISOString() }, coalesce));
+  }, []);
+
+  // Autosave (debounced). The image blob was stored when the project was created.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      saveProject(project).catch(() => onError(t.err_storage));
+    }, 600);
+    return () => clearTimeout(id);
+  }, [project, onError, t]);
+
+  const runAnalysis = useCallback(async () => {
+    onError(null);
+    setNotice(null);
+    const params = hist.present.params;
+    setProgress({ phase: 'engine', fraction: 0 });
+    try {
+      await analysisClient.warmup();
+      onEngineLoaded();
+    } catch {
+      setProgress(null);
+      onError(t.err_engine);
+      return;
+    }
+    try {
+      setProgress({ phase: 'detect', fraction: 0 });
+      const { image, toProject } = analysisPixels(session.canvas, params.analysisMaxSide);
+      const manual = params.sizeMode === 'manual';
+      const res = await analysisClient.detect(
+        {
+          image,
+          sensitivity: params.sensitivity,
+          minRadius: manual ? params.minDiameterPx / 2 / toProject : undefined,
+          maxRadius: manual ? params.maxDiameterPx / 2 / toProject : undefined,
+        },
+        (f) => setProgress({ phase: 'detect', fraction: f }),
+      );
+      const circles = res.circles.map((c) => ({ x: c.x * toProject, y: c.y * toProject, r: c.r * toProject, score: c.score }));
+      commit((p) => {
+        const objects = mergeDetections(p.objects, circles);
+        const grouped = applyGrouping(objects, p.groups, p.grouping);
+        const diam = circles.map((c) => 2 * c.r).sort((a, b) => a - b);
+        return {
+          ...p,
+          ...grouped,
+          analysis: {
+            algorithm: 'circles-multiband-hough-v1',
+            engine: 'OpenCV.js 5.0.0',
+            durationMs: res.durationMs,
+            analysisWidth: image.width,
+            analysisHeight: image.height,
+            estimatedDiameterPx: diam.length ? [diam[Math.floor(diam.length * 0.05)]!, diam[Math.floor(diam.length * 0.95)]!] : null,
+            at: new Date().toISOString(),
+          },
+        };
+      });
+      if (!circles.length) setNotice(t.none_found);
+    } catch (e) {
+      if (e instanceof CancelledError) setNotice(t.cancelled);
+      else onError(t.err_analysis(e instanceof Error ? e.message : String(e)));
+    } finally {
+      setProgress(null);
+    }
+  }, [hist.present.params, session.canvas, commit, onEngineLoaded, onError, t]);
+
+  // New photos are analysed immediately.
+  const autoRan = useRef(false);
+  useEffect(() => {
+    if (session.autoAnalyze && !autoRan.current) {
+      autoRan.current = true;
+      void runAnalysis();
+    }
+  }, [session.autoAnalyze, runAnalysis]);
+
+  const stats = useMemo(() => computeStats(project), [project]);
+  const numbers = useMemo(() => numbering(project.objects), [project.objects]);
+  const selected = project.objects.find((o) => o.id === selectedId && isCounted(o)) ?? null;
+
+  const defaultRadius = (x: number, y: number): number => {
+    const counted = project.objects.filter(isCounted);
+    if (!counted.length) return Math.min(project.image.width, project.image.height) * 0.025;
+    const near = [...counted].sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y)).slice(0, 6);
+    return median(near.map((o) => o.r));
+  };
+
+  const regroup = (p: Project): Project => ({ ...p, ...applyGrouping(p.objects, p.groups, p.grouping) });
+
+  const handlers = {
+    onAdd: (x: number, y: number) => {
+      const r = defaultRadius(x, y);
+      commit((p) => regroup({ ...p, objects: addManualObject(p.objects, x, y, r, null).objects }));
+    },
+    onRemove: (id: string) => {
+      commit((p) => ({ ...p, objects: removeObject(p.objects, id) }));
+      if (id === selectedId) setSelectedId(null);
+    },
+    onSelect: setSelectedId,
+    onMove: (id: string, x: number, y: number, final: boolean) => commit((p) => ({ ...p, objects: updateObject(p.objects, id, { x, y }) }), !final),
+    onResize: (id: string, r: number, final: boolean) =>
+      commit((p) => {
+        const next = { ...p, objects: updateObject(p.objects, id, { r }) };
+        return final ? regroup(next) : next;
+      }, !final),
+  };
+
+  // Keyboard shortcuts.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.closest('input, textarea, select')) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        setHist((h) => (e.shiftKey ? redo(h) : undo(h)));
+      } else if (mod && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        setHist(redo);
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+        handlers.onRemove(selectedId);
+      } else if (e.key === 'Escape') {
+        setSelectedId(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  const confirmAll = () =>
+    commit((p) => ({ ...p, objects: setReview(p.objects, p.objects.filter((o) => isCounted(o)).map((o) => o.id), 'confirmed') }));
+
+  return (
+    <main className="workspace">
+      <section className="stage">
+        <div className="toolbar" role="toolbar">
+          <div className="seg" role="radiogroup">
+            <button className={tool === 'edit' ? 'on' : ''} onClick={() => setTool('edit')} role="radio" aria-checked={tool === 'edit'}>
+              {t.tool_edit}
+            </button>
+            <button className={tool === 'select' ? 'on' : ''} onClick={() => setTool('select')} role="radio" aria-checked={tool === 'select'}>
+              {t.tool_select}
+            </button>
+          </div>
+          <div className="row">
+            <button className="icon" onClick={() => setHist(undo)} disabled={!hist.past.length} title={t.undo} aria-label={t.undo}>
+              ↶
+            </button>
+            <button className="icon" onClick={() => setHist(redo)} disabled={!hist.future.length} title={t.redo} aria-label={t.redo}>
+              ↷
+            </button>
+            <button className="icon" onClick={() => viewerRef.current?.zoomBy(1.4)} title={t.zoom_in} aria-label={t.zoom_in}>
+              +
+            </button>
+            <button className="icon" onClick={() => viewerRef.current?.zoomBy(1 / 1.4)} title={t.zoom_out} aria-label={t.zoom_out}>
+              −
+            </button>
+            <button className="icon" onClick={() => viewerRef.current?.fit()} title={t.zoom_fit} aria-label={t.zoom_fit}>
+              ⤢
+            </button>
+          </div>
+        </div>
+        <Viewer
+          ref={viewerRef}
+          image={session.canvas}
+          objects={project.objects}
+          groups={project.groups}
+          numbers={showNumbers ? numbers : null}
+          selectedId={tool === 'select' ? selectedId : null}
+          tool={tool}
+          showOverlay={showOverlay && !comparing}
+          showRejected={showRejected}
+          {...handlers}
+        />
+        <div className="toolbar bottom">
+          <span className="hint">{tool === 'edit' ? t.tool_edit_hint : t.tool_select_hint}</span>
+          <div className="row">
+            <label className="toggle">
+              <input type="checkbox" checked={showOverlay} onChange={(e) => setShowOverlay(e.target.checked)} /> {t.overlay}
+            </label>
+            <label className="toggle">
+              <input type="checkbox" checked={showNumbers} onChange={(e) => setShowNumbers(e.target.checked)} /> {t.numbers}
+            </label>
+            <label className="toggle">
+              <input type="checkbox" checked={showRejected} onChange={(e) => setShowRejected(e.target.checked)} /> {t.show_rejected}
+            </label>
+            <button
+              className="btn ghost small"
+              onPointerDown={() => setComparing(true)}
+              onPointerUp={() => setComparing(false)}
+              onPointerLeave={() => setComparing(false)}
+              onPointerCancel={() => setComparing(false)}
+            >
+              {t.compare}
+            </button>
+          </div>
+        </div>
+        {progress && (
+          <div className="progress-overlay" role="status" aria-live="polite">
+            <div className="progress-card">
+              <p>{progress.phase === 'engine' ? t.loading_engine : t.analyzing}</p>
+              <progress value={progress.phase === 'engine' ? undefined : progress.fraction} max={1} />
+              <button className="btn small" onClick={() => analysisClient.cancel()}>
+                {t.cancel}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <aside className="side">
+        {notice && <div className="banner info">{notice}</div>}
+        <ResultPanel stats={stats} onConfirmAll={confirmAll} />
+        {selected && (
+          <SelectedPanel
+            obj={selected}
+            number={numbers.get(selected.id) ?? 0}
+            project={project}
+            commit={commit}
+            onRemove={() => handlers.onRemove(selected.id)}
+          />
+        )}
+        <GroupsPanel project={project} stats={stats} commit={commit} />
+        <CalibrationPanel project={project} commit={commit} />
+        <SettingsPanel project={project} commit={commit} running={!!progress} onRun={runAnalysis} />
+        <ExportPanel project={project} canvas={session.canvas} commit={commit} />
+        <button className="btn ghost" onClick={onNewPhoto}>
+          {t.new_photo}
+        </button>
+      </aside>
+    </main>
+  );
+}
+
