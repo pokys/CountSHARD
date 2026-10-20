@@ -32,6 +32,8 @@ DEBUG_SCENE=clutter DEBUG_PNG=/tmp/clutter.png npx vitest run tests/eval/debug
 | Mode B estimate correction: area-weighted region sums, corrected = raw − model(region) + user(region), count edit/remove, overlap/too-small/non-integer refused, never negative, ≤ 3 exemplars, stale result after exemplar change; heat-map ramp; CSV/JSON mark the estimate, round-trip, invalid density grid rejected, old projects default to round objects | `tests/unit/ai.test.ts` | unit |
 | Shipped model: file sizes + SHA-256 equal the download manifest; the int8 model runs in onnxruntime-web (WASM, Node, app session options) and counts a 480 × 360 synthetic rod scene within 10 %; one tile grows RSS by < 250 MB (memory regression guard) | `tests/unit/aiModel.test.ts` | smoke |
 | Crash detection: a leftover run marker is reported once; a WebGPU crash switches the device to WASM | `tests/unit/ai.test.ts` | unit |
+| GeCo2: scale rule (longer side → S, exemplar cap 80·S/1024), ImageNet input + padding, exemplar boxes; detection post-processing (peaks > max/8, NMS, padding filter); edits (remove → rejected / manual deleted, re-run keeps edits, counting area, numbering, tap-added size); automatic model choice (desktop WebGPU → GeCo2 1024, phones → WASM 768, slow / low-memory / unknown → LOCA, measured times override, warnings); download manifest; CSV / JSON (model recorded, count not estimate, malformed result rejected) | `tests/unit/geco2.test.ts` | unit |
+| GeCo2 int8 graphs end to end through the app's TS pipeline (onnxruntime-web WASM): a 480 × 360 synthetic rod scene counted exactly, every box on a true rod — only with `GECO2_MODELS=<folder with the 768 px graphs>` | `tests/unit/geco2.test.ts` | smoke (opt-in) |
 
 Synthetic scenes (`tests/synthetic/scene.ts`) are deterministic (seeded) renders of
 pipe/rod end faces with exact ground truth: hex packing or random packing, mixed
@@ -281,6 +283,188 @@ downloaded" and "AI ready (WebGPU)" separately. Not tested in the browser: the W
 (tested in Node only), phones, PNG export of an AI result (shares `drawAiOverlay` with the
 viewer; CSV/JSON covered by unit tests).
 
+## GeCo2 feasibility (Mode B second model, spike, 2026-10-20)
+
+Not part of the app. Scripts and how to reproduce: `scripts/geco2/README.md`; decision and
+recommendation: `technical-decisions.md` ("Mode B — GeCo2 as a second model"). Same cases as
+the LOCA tables above (exemplars, images, mosaics; dumped by `scripts/geco2/dump-cases.ts`).
+GeCo2 preprocessing and counting as in its own `inference.py`: longer side → 1024 px, further
+down so the mean exemplar side is ≤ 80 px, pad to 1024 × 1024; local maxima of the objectness
+map above max/8, NMS (IoU 0.5), count = boxes left. GeCo2 never tiles.
+
+Columns: **refine** = GeCo2's own pipeline in PyTorch incl. the SAM mask-decoder box
+refinement; **no refine** = PyTorch without it (what the exported graphs compute); **int8** =
+the exported weight-only int8 ONNX graphs (onnxruntime 1.31 CPU), the form a browser build would
+ship. TP / FP / FN for the int8 detections against the true circles (match: centre within 0.5 r).
+
+### Synthetic pipe/rod scenes
+
+| scene | GT | LOCA squash | LOCA tiles (app) | GeCo2 refine | GeCo2 no refine | GeCo2 int8 | int8 TP / FP / FN |
+|---|---|---|---|---|---|---|---|
+| uniform-rods | 296 | 294.4 | 303.1 | 296 | 296 | 296 | 296 / 0 / 0 |
+| uniform-tubes | 217 | 212.8 | 216.9 | 217 | 217 | 217 | 217 / 0 / 0 |
+| dense-small | 2496 | 2307.8 | 2574.1 | 2510 | 2510 | 2509 | 2496 / 13 / 0 |
+| mixed-4-sizes | 260 | 270.7 | 284.0 | 260 | 260 | 260 | 260 / 0 / 0 |
+| mixed-tubes | 220 | 227.2 | 238.5 | 220 | 220 | 220 | 220 / 0 / 0 |
+| uneven-light | 369 | 367.4 | 382.5 | 369 | 369 | 369 | 369 / 0 / 0 |
+| noisy-blurred | 369 | 375.2 | 393.2 | 369 | 369 | 369 | 369 / 0 / 0 |
+| clutter | 120 | 118.2 | 123.8 | 122 | 122 | 122 | 120 / 2 / 0 |
+| perspective-0.88 | 352 | 356.3 | 361.0 | 352 | 352 | 352 | 352 / 0 / 0 |
+| occluded | 280 | 285.2 | 297.8 | 282 | 282 | 283 | 280 / 3 / 0 |
+| **MAE** | | 23.1 | 19.6 | 1.8 | 1.8 | 1.8 | |
+| **mean abs. % error** | | 2.4 % | 4.6 % | 0.3 % | 0.3 % | 0.3 % | |
+
+### FSC-147 sample
+
+| image | GT | LOCA squash | LOCA tiles (app) | GeCo2 refine | GeCo2 no refine | GeCo2 int8 |
+|---|---|---|---|---|---|---|
+| 4943 (tree logs) | 65 | 65.2 | 65.8 | 71 | 71 | 71 |
+| 4947 (tree logs) | 205 | 215.3 | 226.2 | 231 | 240 | 241 |
+| 4950 (tree logs) | 33 | 33.2 | 34.3 | 33 | 33 | 33 |
+| 4951 (tree logs) | 166 | 182.0 | 205.5 | 212 | 226 | 223 |
+| 4952 (tree logs) | 247 | 247.3 | 262.0 | 273 | 289 | 293 |
+| 4957 (tree logs) | 93 | 90.6 | 92.4 | 127 | 135 | 135 |
+| 4958 (tree logs) | 118 | 82.5 | 99.1 | 117 | 122 | 123 |
+| 4961 (tree logs) | 363 | 388.9 | 394.8 | 416 | 425 | 424 |
+| 4964 (tree logs) | 51 | 52.0 | 53.3 | 56 | 59 | 58 |
+| 4966 (tree logs) | 46 | 34.3 | 40.1 | 50 | 52 | 52 |
+| 4967 (tree logs) | 19 | 12.9 | 19.3 | 25 | 25 | 25 |
+| 4970 (tree logs) | 44 | 46.7 | 47.5 | 53 | 57 | 57 |
+| 2227 (apples) | 11 | 8.1 | 8.1 | 10 | 10 | 10 |
+| 2916 (stamps) | 202 | 205.6 | 199.6 | 204 | 204 | 204 |
+| 5839 (strawberries) | 45 | 55.5 | 53.8 | 46 | 50 | 51 |
+| 5852 (strawberries) | 42 | 47.1 | 46.9 | 49 | 51 | 50 |
+| 5917 (eggs) | 12 | 13.5 | 12.5 | 16 | 16 | 16 |
+| 5925 (eggs) | 22 | 20.4 | 23.6 | 23 | 24 | 24 |
+| 6847 (sheep) | 67 | 63.1 | 65.2 | 67 | 68 | 68 |
+| 7109 (keyboard keys) | 48 | 46.4 | 46.4 | 47 | 47 | 47 |
+| **MAE** | | 7.2 | 8.3 | 11.7 | 15.4 | 15.5 |
+| **mean abs. % error** | | 10.7 % | 8.7 % | 12.6 % | 16.2 % | 16.1 % |
+
+### FSC-147 "tree logs", 2 × 2 mosaic
+
+| mosaic | GT | LOCA squash | LOCA tiles (app) | GeCo2 refine | GeCo2 no refine | GeCo2 int8 |
+|---|---|---|---|---|---|---|
+| 4943 ×4 | 260 | 286.9 | 274.0 | 263 | 267 | 266 |
+| 4947 ×4 | 820 | 907.0 | 899.2 | 936 | 936 | 930 |
+| 4950 ×4 | 132 | 137.9 | 139.7 | 132 | 132 | 132 |
+| 4951 ×4 | 664 | 644.6 | 817.8 | 939 | 939 | 940 |
+| 4952 ×4 | 988 | 1023.8 | 1055.8 | 1164 | 1164 | 1163 |
+| 4957 ×4 | 372 | 390.7 | 379.1 | 466 | 488 | 487 |
+| 4958 ×4 | 472 | 450.0 | 446.0 | 448 | 456 | 455 |
+| 4961 ×4 | 1452 | 1439.9 | 1477.7 | 1382 | 1382 | 1383 |
+| 4964 ×4 | 204 | 210.8 | 212.2 | 221 | 225 | 225 |
+| 4966 ×4 | 184 | 163.6 | 172.2 | 185 | 188 | 189 |
+| 4967 ×4 | 76 | 67.4 | 81.0 | 98 | 100 | 100 |
+| 4970 ×4 | 176 | 194.4 | 188.6 | 210 | 221 | 221 |
+| **MAE** | | 23.5 | 34.9 | 69.3 | 72.5 | 71.9 |
+| **mean abs. % error** | | 6.6 % | 7.0 % | 13.9 % | 15.4 % | 15.4 % |
+
+(Mosaics with > 800 candidates skip the SAM refinement in GeCo2's own code, so refine =
+no refine there.)
+
+### On phones (bench page `https://pokys.github.io/geco2-bench/`, 2026-10-20)
+
+Page source in `scripts/geco2/bench-repo/` (Czech UI, models cached, crash marker in
+localStorage). Same int8 graphs; "PC" = onnxruntime CPU count for the identical input.
+
+| device | input | backend | test photo | count (PC, truth) | time per photo (warm) | result |
+|---|---|---|---|---|---|---|
+| iPhone (Safari 27, iOS 26+) | 768 | WebGPU | uniform-tubes | — | — | **tab crashed** in the first backbone run (twice) |
+| iPhone | 768 | WASM | uniform-tubes | 218 (218, 217) | 16.4 s (backbone 8.1 + head 8.3) | OK |
+| iPhone | 768 | WASM | dense-small | 2502 (2502, 2496) | 16.8 s | OK |
+| iPhone | 768 | WASM | 4951 tree logs | 256 (256, 166) | 16.5 s | OK |
+| iPhone | 1024 | WASM | uniform-tubes | 217 (217, 217) | 30.7 s | OK |
+
+| Galaxy A34 5G (Chrome, Mali "valhall", deviceMemory 4) | 768 | WASM | uniform-tubes | 218 (218, 217) | 72.5 s (first run 79.4 s) | OK |
+| Galaxy A34 5G | 768 | WASM | dense-small | 2502 (2502, 2496) | 57.4 s | OK |
+| Galaxy A34 5G | 768 | WASM | 4951 tree logs | 257 (256, 166) | 57.5 s | OK |
+| Galaxy A34 5G | 1024 | WASM | uniform-tubes | 217 (217, 217) | 103.9 s | OK |
+
+All counts on both phones equal the PC's (one ±1 on the Galaxy). On the iPhone WebGPU fails on
+GPU memory, not compute (Safari reports `maxBufferSize` 1024 MB); its CPU path runs ≈ 3×
+faster than the loaded test PC. The Galaxy A34 survives every WASM run but needs ≈ 1 min per
+photo at 768 px (≈ 3.5× the iPhone). WebGPU on the Galaxy at 768 px crashed Chrome (reported
+by the tester, not in the page log), so GeCo2 on WebGPU fails on both phones.
+
+### In the app (dev build, Chromium, Intel Gen12 iGPU, 2026-10-20)
+
+Demo photo (1400 × 1000, 162 pipes of two sizes), 3 exemplars on small pipes, AI model
+"Automaticky" → GeCo2 (WebGPU, 1024 px). Files downloaded from the GeCo2 site (87 MB +
+runtime, hashes verified). **162 of 162** in 5.1 s (8.5 s incl. session start). Tap on a box →
+161 ("1 odebráno"), tap on empty background → 162 ("1 přidáno ručně"), undo works; counting
+area over the left half → 78, numbering and card follow. Switched to LOCA on the same photo:
+only LOCA's 35 MB downloaded (runtime shared), ≈ 83 inside the same area, 2.7 s. Offline menu
+lists LOCA and GeCo2 1024 px with sizes; deleting LOCA keeps GeCo2 usable (runtime moved to
+GeCo2's cache). A simulated GeCo2 crash on WebGPU shows the Czech message, sets WASM for GeCo2
+and the panel's "Přepnout na LOCA" switches and remembers LOCA. GeCo2 on WASM 768 px in the
+same browser: **162 of 162 in 20.5 s** (estimate before the run: 22 s). Not yet tried in the
+app on the phones (the bench page measured them, see above).
+
+### Reading the GeCo2 tables
+
+- **Pipes/rods (the app's use case): GeCo2 is near-perfect and object-exact.** Every scene
+  within +3, all true objects found (one missed in PyTorch on "occluded"); false positives:
+  13 of 2,509 on 18 px rods, 2 in clutter, 3 at the occluding bar. LOCA's best protocol has
+  MAE 23 and gives no objects. Mixed sizes (4 diameters from 3 exemplars) are exact without
+  tiling.
+- **FSC-147 is worse than LOCA**, almost entirely on "tree logs": GeCo2 also boxes partly
+  hidden logs at the back and sides of a pile, which the dataset's annotation leaves out
+  (checked visually on 4951 and 4957; the boxes are on real log ends). Other classes are on
+  par with or better than LOCA.
+- **int8 costs nothing measurable** (no refine vs int8: MAE 1.8 / 1.8, 15.4 / 15.5,
+  72.5 / 71.9). The **SAM box refinement** is worth ≈ 4 MAE on FSC (fewer duplicate boxes
+  after NMS) and nothing on the synthetic scenes; it is not exported (see technical-decisions).
+- Only 10 synthetic scenes, 20 dataset photos and 12 mosaics; still no real pipe photos.
+
+### Input resolution (int8, same rules with 1024 replaced by S and the exemplar cap 80·S/1024)
+
+| set | LOCA tiles (app) | GeCo2 1024 | GeCo2 768 | GeCo2 512 |
+|---|---|---|---|---|
+| synthetic, MAE | 19.6 | 1.8 | 1.1 | 190.4 |
+| — dense-small (2,496 rods, 18 px) | 2574.1 | 2509 (13 FP, 0 FN) | 2501 (13 FP, 8 FN) | 641 (1,953 missed) |
+| — mixed-4-sizes (260) | 284.0 | 260 | 260 | 272 (12 FP) |
+| FSC-147 sample, MAE | 8.3 | 15.5 | 14.0 | 26.6 |
+| tree-log mosaics, MAE | 34.9 | 71.9 | 82.8 | 113.8 |
+
+768 px keeps GeCo2's accuracy on the synthetic scenes (objects ≥ 18 px in the photo become
+≥ 13 px) and on FSC-147, and costs a little on the mosaics; 512 px loses small objects.
+
+### Export check, size, speed and memory
+
+- Rewritten export modules vs the original GeCo2 forward: objectness max abs. difference
+  ≤ 7e-6, ltrb ≤ 2e-6 (3 images). fp32 ONNX (onnxruntime CPU) gives the same counts as
+  PyTorch (217 = 217, 4951: 226 = 226).
+- Weight-only int8 sizes: backbone 71.3 MB, head 16.0 MB, exemplars 0.1 MB = **87.4 MB**
+  (LOCA 34.9 MB). 768 px: 82 MB, 512 px: 79 MB (the backbone weights dominate).
+- **onnxruntime-web WASM, 1 thread, Node 24** (`node scripts/geco2/geco2-probe.mjs <dir> <size> w8 disabled`),
+  RSS after one backbone + exemplars + head run. Times were measured while other CPU jobs ran
+  (all of them; uncontended runs would be somewhat faster — estimate 20–30 %):
+
+  | graphs | input | after sessions | after run | backbone | head |
+  |---|---|---|---|---|---|
+  | first export | 1024 | 338 MB | 990 MB | 41.6 s | 36.8 s |
+  | first export, arena + mem pattern off | 1024 | 338 MB | 989 MB | 41.7 s | 37.4 s |
+  | lean (Hiera in row bands, head in stripes) | 1024 | 346 MB | **835 MB** | 50.9 s | 50.3 s |
+  | first export | 768 | 334 MB | 739 MB | 26.4 s | 26.2 s |
+  | first export | 512 | 371 MB | 556 MB | 12.2 s | 10.0 s |
+
+  For comparison LOCA: ≈ 310 MB after a run, ≈ 5 s per tile; the iPhone crashed at ≈ 830 MB.
+- **Chromium-based browser, Intel Gen12 iGPU, onnxruntime-web 1.30**, 1024 px,
+  `scripts/geco2/bench.html`: WebGPU first run 7.1–9.8 s (incl. shader compilation), warm
+  **5.4–6.7 s** per photo (backbone 2.6–3.9 s, head 2.3–2.9 s), session creation 5–8 s;
+  counts equal the CPU counts (217, 223). WASM in the same browser: 97.6 s (CPU busy with
+  other jobs). LOCA on the same bench: 3.5 s for one 512 tile (WebGPU, first run).
+- **GPU memory** (Windows "GPU Process Memory" counters of the browser's GPU process, dedicated
+  + shared, while the page holds its sessions after one run; 45 MB after leaving the page):
+  GeCo2 1024 ≈ **2.0 GB**, LOCA ≈ 0.85 GB.
+- **WebGPU correctness.** An in-graph int64 `Clip` (row indices of the striped upsampling)
+  returned wrong data on WebGPU (objectness off by 0.41); fixed by literal index constants.
+  Remaining: the int8 backbone's deepest output differs from CPU locally (max 0.65 at values
+  up to 2.1) only when its intermediates are not graph outputs — a buffer-reuse problem
+  inside onnxruntime-web; final objectness within 0.04 of CPU and equal counts on the two
+  photos tested. Phones were not tested.
+
 ## Not yet tested (honest gaps)
 
 - **Real photographs.** No annotated real pipe photos are in the repo; synthetic
@@ -297,3 +481,5 @@ viewer; CSV/JSON covered by unit tests).
 - **Mode B on real photos** of the target objects, on phones, and with the WASM fallback in
   a browser (WASM measured in Node only); whether the exemplar band should be lowered to stop
   the over-count when tiles upscale.
+- **GeCo2 on phones** (iPhone 17 Pro, Galaxy A): speed, GPU memory, whether the tab survives;
+  GeCo2 on real pipe photos; the onnxruntime-web WebGPU backbone deviation (see above).

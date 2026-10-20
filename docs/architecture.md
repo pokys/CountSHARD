@@ -7,7 +7,9 @@ src/
     clustering.ts  size classes (KDE modes / 1-D k-means)
     client.ts      main-thread client of the worker (progress, cancel, warm-up)
     cv.ts          OpenCV typing shim + Mat lifetime helper
-  ai/            Mode B (generic objects, LOCA density estimate) — pure except client/modelStore
+  ai/            Mode B (generic objects: LOCA density estimate or GeCo2 detections) — pure except client/modelStore/device glue
+    geco2.ts       GeCo2 scale/input/boxes, detection post-processing (peaks + NMS), editing of detections
+    device.ts      device profile (mobile, WebGPU, deviceMemory, CPU benchmark, measured run times) → model choice
     tiling.ts      aspect-preserving scale from exemplar size, 512 px tiles with ownership
     tensor.ts      RGBA → normalised NCHW (letterbox), resize, stitching into a density grid
     runner.ts      runs a tile plan on an abstract backend (worker: ORT-Web; eval: ORT-Web/Node)
@@ -16,7 +18,8 @@ src/
     modelStore.ts  lazy download of model + ORT WASM into Cache Storage (progress, SHA-256)
     client.ts      main-thread client of the AI worker + "downloaded / ready" status
   workers/       analysis.worker.ts (owns OpenCV.js), protocol.ts,
-                 ai.worker.ts (owns onnxruntime-web + the two LOCA graphs), aiProtocol.ts
+                 ai.worker.ts (owns onnxruntime-web + the sessions of one model: LOCA's two graphs or
+                 GeCo2's three), aiProtocol.ts
   model/         types.ts — Project, CountedObject, SizeGroup, params
   state/         project.ts (pure operations), history.ts (undo/redo)
   io/            image.ts (decode/normalise), draw.ts (shared renderer),
@@ -69,6 +72,33 @@ tests/
 7. **Display/export**: heat map + exemplar boxes + region boxes (`drawAiOverlay`, shared by
    viewer and PNG), CSV with explicit estimate rows, JSON with `summary.estimate.isEstimate`.
 
+### GeCo2 (second Mode B model, individual detections)
+
+1. **Model choice** (`ai/device.ts`, `ai/client.ts`): per-device choice in localStorage
+   (`auto` | `loca` | `geco2`). `auto` resolves from the device profile: GeCo2 only when the
+   expected time per photo is ≤ 25 s (measured on this device, otherwise WebGPU ≈ 8 s or a CPU
+   benchmark × calibration) and the device does not report < 3 GB memory. GeCo2 runs on WebGPU
+   at 1024 px only on non-mobile devices; phones always use WASM at 768 px (WebGPU crashed both
+   test phones).
+2. **Download** (`geco2Assets(size)`): three graphs per input size from
+   `https://pokys.github.io/geco2-bench/models/` (CORS allowed), size + SHA-256 checked, cache
+   `countshard-geco2-v1`. The ORT WASM runtime is shared: found via `caches.match` in either
+   model's cache, moved to the other cache before a delete.
+3. **Inference** (`ai.worker.ts` `detect`): photo scaled on the main thread (`geco2Scale`:
+   longer side → S, mean exemplar side ≤ 80·S/1024), padded to S × S in the worker; backbone and
+   head on WebGPU or WASM, the tiny exemplar graph (RoIAlign) always on WASM; `geco2Detect`
+   (local maxima > max/8, NMS 0.5, centres in the padding dropped) → boxes in model pixels.
+4. **Result** (`AiDetectionResult`): detections in project pixels (`AiDetection`: box, score,
+   source, review), model id/name, engine, input size, scale. A re-run merges like circle mode
+   (`mergeAiDetections`: manual/confirmed kept, rejected stay rejected).
+5. **Display/edit**: detections are drawn and edited through the circle-mode path
+   (`asCountedObjects` + `boxes` in `drawAnnotations`): numbered boxes, tap removes (auto →
+   rejected) or adds (typical neighbour size), counting area respected, undo/redo.
+6. **Export**: PNG with numbered boxes and the model in the footer, CSV one row per counted
+   object with the model on every row, JSON `summary.detections` (`isEstimate: false`).
+7. **Crash guard**: the run marker records model + backend; after a GeCo2 crash on WebGPU the
+   device uses WASM for GeCo2, and the AI panel offers switching to LOCA.
+
 ## Object model
 
 `CountedObject { id, x, y, r, source: auto|manual, review: unreviewed|confirmed|rejected,
@@ -92,7 +122,7 @@ and the app version — so an exported file documents how its numbers were produ
 worker with embedded OpenCV WASM and the 0.4 MB AI worker), icons and the manifest. No
 runtime network access is needed after install for Mode A. Mode B files (`.onnx`, ORT
 `.wasm`) are excluded from the precache by its glob patterns and stored in a separate
-cache (`countshard-ai-v1`) after the user downloads them. `pwa/offline.ts` and
+caches (`countshard-ai-v2` for LOCA, `countshard-geco2-v1` for GeCo2) after the user downloads them. `pwa/offline.ts` and
 `ai/client.ts` verify each layer separately.
 
 ## Extension points

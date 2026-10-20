@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
-import { type CountedObject, type MultiShotInfo, type Project, isCandidate, isCounted } from '../model/types';
+import { type CountedObject, type MultiShotInfo, type Project, isCandidate, isCounted, isDetectionResult } from '../model/types';
 import { MIN_GROUP_SIZE } from '../analysis/clustering';
 import {
   type ProjectStats,
@@ -15,10 +15,11 @@ import {
   unlockAllGroups,
   updateObject,
 } from '../state/project';
-import { blobToDataUrl, downloadBlob, renderAiPng, renderAnnotatedPng, safeFilename } from '../io/export';
+import { blobToDataUrl, downloadBlob, renderAiDetectionsPng, renderAiPng, renderAnnotatedPng, safeFilename } from '../io/export';
 import { canvasToBlob } from '../io/image';
-import { toAiCsv, toCsv, toProjectFile } from '../io/serialize';
+import { toAiCsv, toAiDetectionsCsv, toCsv, toProjectFile } from '../io/serialize';
 import { roundEstimate, summarize } from '../ai/estimate';
+import { countedDetections } from '../ai/geco2';
 import type { Commit } from './Workspace';
 
 /**
@@ -467,6 +468,12 @@ export function useExportPng(project: Project, canvas: HTMLCanvasElement): () =>
   return async () => {
     const base = safeFilename(project.name);
     const date = new Date().toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB');
+    if (project.mode === 'ai' && isDetectionResult(project.ai?.result)) {
+      const n = countedDetections(project.ai!.result.objects, project.countArea ?? null).length;
+      const blob = await renderAiDetectionsPng(canvas, project, { title: t.legend_title, total: t.legend_det_total, footer: `${t.legend_det_footer(date)} ${project.ai!.result.model}` });
+      downloadBlob(blob, `${base}-${t.ai_det_qb}-${n}.png`);
+      return;
+    }
     if (project.mode === 'ai') {
       const aiSum = project.ai ? summarize(project.ai, project.countArea ?? null) : null;
       if (!aiSum) return;
@@ -499,10 +506,22 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
   const base = safeFilename(project.name);
 
   const aiMode = project.mode === 'ai';
+  const aiDet = aiMode && isDetectionResult(project.ai?.result);
   const aiSum = aiMode && project.ai ? summarize(project.ai, project.countArea ?? null) : null;
+  const aiHasResult = aiDet || !!aiSum;
 
   const png = useExportPng(project, canvas);
   const csv = () => {
+    if (aiDet) {
+      const text = toAiDetectionsCsv(project, {
+        decimal: lang === 'cs' ? ',' : '.',
+        headers: t.csv_det,
+        sourceLabels: { auto: t.source_auto, manual: t.source_manual },
+        reviewLabels: { unreviewed: t.review_unreviewed, confirmed: t.review_confirmed },
+      });
+      downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${base}-${t.ai_det_qb}.csv`);
+      return;
+    }
     if (aiMode) {
       const text = toAiCsv(project, {
         decimal: lang === 'cs' ? ',' : '.',
@@ -533,10 +552,10 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
         <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== project.name && commit((p) => ({ ...p, name: name.trim() }))} />
       </label>
       <div className="row wrap">
-        <button className="btn primary" onClick={png} disabled={aiMode && !aiSum} data-testid="export-png">
+        <button className="btn primary" onClick={png} disabled={aiMode && !aiHasResult} data-testid="export-png">
           {t.export_png}
         </button>
-        <button className="btn" onClick={csv} disabled={aiMode && !aiSum}>
+        <button className="btn" onClick={csv} disabled={aiMode && !aiHasResult}>
           {t.export_csv}
         </button>
         <button className="btn" onClick={json}>

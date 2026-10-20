@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GeCo2 test na telefonu</title>
+<style>
+  :root { color-scheme: light dark; --bg: #0f172a; --fg: #e2e8f0; --mut: #94a3b8; --acc: #38bdf8; --bad: #f87171; --ok: #4ade80; --card: #1e293b; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.mut, .mut { color: var(--mut); font-size: 13px; }
+  .card { background: var(--card); border-radius: 10px; padding: 12px; margin: 12px 0; }
+  label { display: block; margin: 6px 0 2px; color: var(--mut); font-size: 13px; }
+  select, button { font: inherit; width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: var(--fg); }
+  button { background: var(--acc); color: #00131f; font-weight: 600; border: 0; margin-top: 10px; }
+  button.sec { background: #334155; color: var(--fg); }
+  .row { display: flex; gap: 8px; } .row > * { flex: 1; min-width: 0; }
+  select { max-width: 100%; text-overflow: ellipsis; }
+  main, .card { min-width: 0; overflow-wrap: anywhere; }
+  #status { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 13px; }
+  .bad { color: var(--bad); } .ok { color: var(--ok); }
+  canvas { width: 100%; height: auto; border-radius: 8px; margin-top: 8px; background: #000; }
+  pre { white-space: pre-wrap; font-size: 12px; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>GeCo2 – test na telefonu</h1>
+  <p class="mut">Stáhne model GeCo2 (jednorázově, pak z mezipaměti), spočítá testovací fotku a ukáže čas a počet.
+    Když telefon nezvládne paměť, karta spadne – po znovuotevření tato stránka řekne, v jakém kroku.</p>
+
+  <div class="card" id="crash" hidden></div>
+
+  <div class="card">
+    <div id="device" class="mut">Zjišťuji zařízení…</div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div><label for="size">Velikost vstupu</label>
+        <select id="size"><option value="768">768 px (pro telefony, ≈ 83 MB)</option><option value="1024">1024 px (plná, ≈ 88 MB)</option></select></div>
+      <div><label for="ep">Výpočet</label>
+        <select id="ep"><option value="webgpu">WebGPU (grafika)</option><option value="wasm">WASM (procesor, velmi pomalé)</option></select></div>
+    </div>
+    <label for="case">Testovací fotka</label>
+    <select id="case"></select>
+    <button id="run">Spustit test</button>
+    <div class="row"><button class="sec" id="copy">Kopírovat výsledky</button><button class="sec" id="clear">Smazat stažené modely</button></div>
+  </div>
+
+  <div class="card"><div id="status">Připraveno.</div><canvas id="view" hidden></canvas></div>
+
+  <div class="card"><div class="mut">Historie testů na tomto zařízení</div><pre id="log"></pre></div>
+
+  <p class="mut">Model GeCo2 (Pelhan, Lukežič, Kristan, AAAI 2026; kód MIT, páteř SAM2 Hiera B+ Apache 2.0),
+    převedený do ONNX int8 pro onnxruntime-web 1.30. Pouze testovací stránka.</p>
+</main>
+<script type="module">
+import * as ort from './ort/ort.min.mjs';
+
+const $ = (id) => document.getElementById(id);
+const CACHE = 'geco2-bench-v1';
+const RUN_KEY = 'geco2bench.running', LOG_KEY = 'geco2bench.log';
+const store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } },
+  del(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } },
+};
+ort.env.wasm.numThreads = 1;
+ort.env.wasm.wasmPaths = new URL('./ort/', location.href).href;
+
+let lines = [];
+const say = (t, cls) => { lines.push(cls ? `<span class="${cls}">${t}</span>` : t); $('status').innerHTML = lines.join('\n'); };
+const step = (name, cfg) => store.set(RUN_KEY, { step: name, cfg, at: new Date().toISOString() });
+const mb = (b) => (b / 1048576).toFixed(1);
+
+// ---- device info
+const info = { ua: navigator.userAgent, cores: navigator.hardwareConcurrency, deviceMemoryGB: navigator.deviceMemory ?? null, webgpu: false, adapter: null };
+async function deviceInfo() {
+  if (navigator.gpu) {
+    try {
+      const a = await navigator.gpu.requestAdapter();
+      if (a) {
+        info.webgpu = true;
+        const i = a.info ?? (a.requestAdapterInfo ? await a.requestAdapterInfo() : {});
+        info.adapter = [i.vendor, i.architecture, i.device, i.description].filter(Boolean).join(' / ') || 'neznámý';
+        info.maxBufferMB = Math.round(a.limits.maxBufferSize / 1048576);
+        info.maxStorageBindingMB = Math.round(a.limits.maxStorageBufferBindingSize / 1048576);
+      }
+    } catch (e) { info.adapterError = String(e); }
+  }
+  $('device').innerHTML = `WebGPU: <b class="${info.webgpu ? 'ok' : 'bad'}">${info.webgpu ? 'ano' : 'ne'}</b>`
+    + (info.adapter ? ` (${info.adapter}, max. buffer ${info.maxBufferMB} MB)` : '')
+    + `<br>Paměť (deviceMemory): ${info.deviceMemoryGB ?? 'neuvádí'} GB · jader: ${info.cores}<br><span class="mut">${info.ua}</span>`;
+  if (!info.webgpu) $('ep').value = 'wasm';
+}
+
+// ---- previous crash?
+const left = store.get(RUN_KEY, null);
+if (left) {
+  $('crash').hidden = false;
+  $('crash').innerHTML = `<b class="bad">Minulý test nedoběhl.</b> Poslední krok: <b>${left.step}</b><br>`
+    + `<span class="mut">${left.cfg.size} px, ${left.cfg.ep}, ${left.cfg.key} · ${left.at}. Nejspíš karta spadla (paměť).</span>`;
+  const log = store.get(LOG_KEY, []);
+  log.unshift({ at: left.at, ...left.cfg, result: `SPADLO při: ${left.step}` });
+  store.set(LOG_KEY, log.slice(0, 30));
+  store.del(RUN_KEY);
+}
+function showLog() {
+  $('log').textContent = store.get(LOG_KEY, []).map((r) => JSON.stringify(r)).join('\n') || '—';
+}
+showLog();
+
+// ---- cases
+const cases = await (await fetch('inputs/index.json')).json();
+function fillCases() {
+  const s = Number($('size').value);
+  $('case').innerHTML = cases.filter((c) => c.size === s)
+    .map((c) => `<option value="${c.key}">${c.name} – skutečně ${c.gt}, PC spočítá ${c.cpu_count}</option>`).join('');
+}
+$('size').onchange = fillCases;
+fillCases();
+deviceInfo();
+
+// ---- model download with progress + Cache Storage
+async function model(url) {
+  let cache = null;
+  try { cache = await caches.open(CACHE); } catch { /* no cache API */ }
+  let res = cache && await cache.match(url);
+  if (res) return new Uint8Array(await res.arrayBuffer());
+  res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  const total = Number(res.headers.get('content-length')) || 0;
+  const reader = res.body.getReader();
+  const parts = [];
+  let got = 0, last = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value); got += value.length;
+    if (got - last > 4 * 1048576) { last = got; lines[lines.length - 1] = `Stahuji ${url.split('/').pop()}: ${mb(got)}${total ? ' / ' + mb(total) : ''} MB`; $('status').innerHTML = lines.join('\n'); }
+  }
+  const buf = new Uint8Array(got);
+  let o = 0; for (const p of parts) { buf.set(p, o); o += p.length; }
+  if (cache) { try { await cache.put(url, new Response(buf)); } catch { /* quota */ } }
+  return buf;
+}
+
+// ---- GeCo2 post-processing (as in GeCo2's evaluation)
+function detect(obj, ltrb, H, W, content, size) {
+  let max = -Infinity;
+  for (const v of obj) if (v > max) max = v;
+  const cand = [];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const v = obj[y * W + x];
+    if (!(v > max / 8) || !(v > max * 0.11)) continue;
+    let peak = true;
+    for (let dy = -1; dy <= 1 && peak; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const yy = y + dy, xx = x + dx;
+      if (yy >= 0 && xx >= 0 && yy < H && xx < W && obj[yy * W + xx] > v) { peak = false; break; }
+    }
+    if (!peak) continue;
+    const i = y * W + x, n = H * W, cx = x / W, cy = y / H;
+    cand.push({ v, b: [cx - ltrb[i], cy - ltrb[n + i], cx + ltrb[2 * n + i], cy + ltrb[3 * n + i]] });
+  }
+  cand.sort((a, b) => b.v - a.v);
+  const area = (b) => (b[2] - b[0]) * (b[3] - b[1]);
+  const keep = [];
+  for (const c of cand) {
+    let ok = true;
+    for (const k of keep) {
+      const iw = Math.min(c.b[2], k.b[2]) - Math.max(c.b[0], k.b[0]), ih = Math.min(c.b[3], k.b[3]) - Math.max(c.b[1], k.b[1]);
+      const inter = Math.max(0, iw) * Math.max(0, ih);
+      if (inter / (area(c.b) + area(k.b) - inter) > 0.5) { ok = false; break; }
+    }
+    if (ok) keep.push(c);
+  }
+  return keep.map((c) => c.b.map((v) => Math.min(1, Math.max(0, v))))
+    .filter((b) => ((b[0] + b[2]) / 2) * size < content[0] && ((b[1] + b[3]) / 2) * size < content[1]);
+}
+
+async function loadInput(meta) {
+  const bmp = await createImageBitmap(await (await fetch(`inputs/${meta.key}.png`)).blob());
+  const cv = $('view');
+  cv.width = bmp.width; cv.height = bmp.height; cv.hidden = false;
+  const g = cv.getContext('2d');
+  g.drawImage(bmp, 0, 0);
+  const px = g.getImageData(0, 0, bmp.width, bmp.height).data;
+  const S = meta.size, n = S * S, x = new Float32Array(3 * n);
+  const mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225];
+  for (let yy = 0; yy < bmp.height; yy++) for (let xx = 0; xx < bmp.width; xx++) {
+    const s = (yy * bmp.width + xx) * 4, t = yy * S + xx;
+    for (let c = 0; c < 3; c++) x[c * n + t] = (px[s + c] / 255 - mean[c]) / std[c];
+  }
+  return x; // padding stays 0 = ImageNet mean, as in GeCo2
+}
+
+function draw(boxes, meta) {
+  const g = $('view').getContext('2d');
+  g.lineWidth = Math.max(1, meta.size / 600);
+  g.strokeStyle = '#fb923c';
+  for (const b of boxes) g.strokeRect(b[0] * meta.size, b[1] * meta.size, (b[2] - b[0]) * meta.size, (b[3] - b[1]) * meta.size);
+  g.strokeStyle = '#ef4444'; g.lineWidth *= 2;
+  for (let i = 0; i < meta.boxes.length; i += 4) g.strokeRect(meta.boxes[i], meta.boxes[i + 1], meta.boxes[i + 2] - meta.boxes[i], meta.boxes[i + 3] - meta.boxes[i + 1]);
+}
+
+$('run').onclick = async () => {
+  $('run').disabled = true;
+  lines = [];
+  const S = Number($('size').value), ep = $('ep').value, key = $('case').value;
+  const cfg = { size: S, ep, key, device: info.adapter ?? 'bez WebGPU', deviceMemoryGB: info.deviceMemoryGB };
+  const res = { at: new Date().toISOString(), ...cfg };
+  const T = {};
+  let t = performance.now();
+  const lap = (k) => { const n = performance.now(); T[k] = Math.round(n - t); t = n; };
+  const sessions = [];
+  try {
+    const meta = await (await fetch(`inputs/${key}.json`)).json();
+    const opts = { executionProviders: [ep], graphOptimizationLevel: 'disabled' };
+    const files = {};
+    for (const k of ['backbone', 'exemplars', 'head']) {
+      step(`stahování ${k}`, cfg); say(`Stahuji ${k}…`);
+      files[k] = await model(`models/geco2-${k}-${S}-w8.onnx`);
+    }
+    lap('download_ms');
+    for (const k of ['backbone', 'exemplars', 'head']) {
+      step(`vytvoření ${k}`, cfg); say(`Připravuji ${k} (${mb(files[k].length)} MB)…`);
+      sessions.push(await ort.InferenceSession.create(files[k], k === 'exemplars' ? { ...opts, executionProviders: ['wasm'] } : opts));
+      files[k] = null;
+    }
+    lap('create_ms');
+    const [b, e, h] = sessions;
+    const img = await loadInput(meta);
+    for (const run of [1, 2]) {
+      step(`běh ${run}: páteř (backbone)`, cfg); say(`Běh ${run}: páteř…`);
+      t = performance.now();
+      const f = await b.run({ image: new ort.Tensor('float32', img, [1, 3, S, S]) });
+      const feat = {};
+      for (const k of ['feat', 'fpn1', 'fpn0']) { feat[k] = new ort.Tensor('float32', await f[k].getData(), f[k].dims); f[k].dispose?.(); }
+      lap(`run${run}_backbone_ms`);
+      step(`běh ${run}: hlava (head)`, cfg); say(`Běh ${run}: hlava…`);
+      const p = await e.run({ ...feat, boxes: new ort.Tensor('float32', new Float32Array(meta.boxes), [1, meta.boxes.length / 4, 4]) });
+      const o = await h.run({ ...feat, proto0: p.proto0, proto1: p.proto1, proto2: p.proto2 });
+      const obj = await o.objectness.getData(), ltrb = await o.ltrb.getData();
+      lap(`run${run}_head_ms`);
+      const boxes = detect(obj, ltrb, o.objectness.dims[2], o.objectness.dims[3], meta.content, S);
+      res[`run${run}_count`] = boxes.length;
+      say(`Běh ${run}: ${boxes.length} objektů (PC: ${meta.cpu_count}, skutečně: ${meta.gt}) za ${((T[`run${run}_backbone_ms`] + T[`run${run}_head_ms`]) / 1000).toFixed(1)} s`,
+        Math.abs(boxes.length - meta.cpu_count) <= Math.max(2, meta.cpu_count * 0.02) ? 'ok' : 'bad');
+      if (run === 1) draw(boxes, meta);
+    }
+    Object.assign(res, T, { cpu_count: meta.cpu_count, gt: meta.gt });
+    if (performance.memory) res.jsHeapMB = Math.round(performance.memory.usedJSHeapSize / 1048576);
+    res.result = 'OK';
+    say(`Hotovo. Stažení ${(T.download_ms / 1000).toFixed(1)} s, příprava ${(T.create_ms / 1000).toFixed(1)} s.`, 'ok');
+  } catch (err) {
+    res.result = `CHYBA: ${String(err && err.message || err).slice(0, 300)}`;
+    say(res.result, 'bad');
+  } finally {
+    for (const s of sessions) { try { await s.release(); } catch { /* ignore */ } }
+    store.del(RUN_KEY);
+    const log = store.get(LOG_KEY, []);
+    log.unshift(res);
+    store.set(LOG_KEY, log.slice(0, 30));
+    showLog();
+    $('run').disabled = false;
+  }
+};
+
+$('copy').onclick = async () => {
+  const text = JSON.stringify({ device: info, log: store.get(LOG_KEY, []) }, null, 1);
+  try { await navigator.clipboard.writeText(text); $('copy').textContent = 'Zkopírováno'; }
+  catch { $('log').textContent = text; $('copy').textContent = 'Označte text níže'; }
+  setTimeout(() => { $('copy').textContent = 'Kopírovat výsledky'; }, 2500);
+};
+$('clear').onclick = async () => {
+  try { await caches.delete(CACHE); } catch { /* ignore */ }
+  $('clear').textContent = 'Smazáno';
+  setTimeout(() => { $('clear').textContent = 'Smazat stažené modely'; }, 2500);
+};
+</script>
+</body>
+</html>

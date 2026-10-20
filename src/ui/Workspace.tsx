@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
-import { type CountArea, type MultiShotInfo, type Project, inCountArea, isCounted, isSelectable } from '../model/types';
+import { type AiDetection, type CountArea, type MultiShotInfo, type Project, inCountArea, isCounted, isDensityResult, isDetectionResult, isSelectable } from '../model/types';
 import { median } from '../analysis/clustering';
 import { CancelledError, analysisClient } from '../analysis/client';
 import { ImageLoadError, analysisPixels, loadImageFile } from '../io/image';
@@ -24,9 +24,22 @@ import {
 import type { Session } from './App';
 import { Viewer, type Tool, type ViewerHandle } from './Viewer';
 import { CalibrationPanel, ExportPanel, type ExtraPhoto, GroupsPanel, MultiShotPanel, ResultPanel, SelectedPanel, SettingsPanel, useExportPng } from './Panels';
-import { AiPanel, AiResultPanel, type PendingRegion } from './AiPanels';
+import { AiDetectionResultPanel, AiPanel, AiResultPanel, type PendingRegion } from './AiPanels';
 import { type AiStatus, aiClient } from '../ai/client';
-import { AI_MODEL_ID, AiDownloadError, ORT_VERSION, deleteAi } from '../ai/modelStore';
+import { AI_MODEL_ID, AiDownloadError, ORT_VERSION, geco2ModelId } from '../ai/modelStore';
+import {
+  asCountedObjects,
+  boxesOf,
+  countedDetections,
+  geco2Boxes,
+  geco2ContentSize,
+  geco2Scale,
+  mergeAiDetections,
+  newManualDetection,
+  removeAiDetection,
+  toProjectDetections,
+  typicalBox,
+} from '../ai/geco2';
 import { planTiles } from '../ai/tiling';
 import { GRID_CELL } from '../ai/runner';
 import { addCorrection, addExemplar, decodeDensity, emptyAiState, encodeDensity, normalizeRect, roundEstimate, sumInRect, summarize, estimateTooLow, exemplarSizeRatio, exemplarsTooDifferent } from '../ai/estimate';
@@ -288,8 +301,18 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const [regionError, setRegionError] = useState<string | null>(null);
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   const aiSummary = useMemo(() => (project.ai ? summarize(project.ai, project.countArea ?? null) : null), [project.ai, project.countArea]);
-  const aiResult = project.ai?.result ?? null;
+  const anyAiResult = project.ai?.result ?? null;
+  /** LOCA density estimate (null for a GeCo2 result). */
+  const aiResult = isDensityResult(anyAiResult) ? anyAiResult : null;
+  /** GeCo2 detections (null for a LOCA result). */
+  const detResult = isDetectionResult(anyAiResult) ? anyAiResult : null;
   const heat = useMemo(() => (aiResult ? heatCanvas(aiResult) : null), [aiResult]);
+  const detObjects = useMemo(() => (detResult ? asCountedObjects(detResult.objects) : []), [detResult]);
+  const detShown = useMemo(() => detObjects.filter((o) => inCountArea(project.countArea, o.x, o.y)), [detObjects, project.countArea]);
+  const detNumbers = useMemo(() => numbering(detObjects, project.countArea ?? null), [detObjects, project.countArea]);
+  const detBoxes = useMemo(() => (detResult ? boxesOf(detResult.objects) : null), [detResult]);
+  const detCount = useMemo(() => (detResult ? countedDetections(detResult.objects, project.countArea ?? null).length : 0), [detResult, project.countArea]);
+  const aiModel = aiStatus.decision?.model ?? 'loca';
   const [showHeat, setShowHeat] = useState(true);
 
   // Phones kill the tab when OpenCV's WASM heap and the AI model are both resident, so the
@@ -304,7 +327,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     if (progress) return;
     commit((p) => ({ ...p, mode: m, ai: p.ai ?? (m === 'ai' ? emptyAiState() : p.ai) }));
     if (m === 'ai') freeOpenCv();
-    setTool(m === 'ai' ? ((project.ai?.exemplars.length ?? 0) > 0 ? 'pan' : 'exemplar') : 'edit');
+    setTool(m === 'ai' ? (detResult ? 'edit' : (project.ai?.exemplars.length ?? 0) > 0 ? 'pan' : 'exemplar') : 'edit');
     setPendingRegion(null);
     setSelectedId(null);
   };
@@ -320,10 +343,56 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   }, [t]);
 
   const deleteModel = useCallback(async () => {
-    aiClient.cancel();
-    await deleteAi();
-    await aiClient.refresh();
+    const m = aiClient.model;
+    await aiClient.deleteModel(m === 'loca' ? 'loca' : aiClient.status.geco2?.size === 1024 ? 'geco2_1024' : 'geco2_768');
   }, []);
+
+  /** GeCo2: individual detections, merged with the user's earlier edits. */
+  const runGeco2 = useCallback(async () => {
+    const ai = hist.present.ai!;
+    const exemplars = ai.exemplars;
+    const size = aiClient.status.geco2?.size ?? 768;
+    const W = session.canvas.width;
+    const H = session.canvas.height;
+    const scale = geco2Scale(W, H, exemplars, size);
+    const content = geco2ContentSize(W, H, scale, size);
+    // The scale actually applied (content is rounded down to whole pixels).
+    const sx = content.w / W;
+    const scaled = scaledPixels(session.canvas, content.w, content.h);
+    const out = await aiClient.detect(
+      scaled,
+      geco2Boxes(exemplars, sx),
+      (f) => setProgress({ phase: 'ai-run', fraction: f }),
+      () => {
+        setNotice(t.ai_fallback_wasm);
+        setProgress({ phase: 'ai-load', fraction: 0 });
+      },
+    );
+    const fresh = toProjectDetections(out, sx);
+    commit((p) => {
+      const prev = isDetectionResult(p.ai?.result) ? p.ai!.result.objects : [];
+      return {
+        ...p,
+        ai: {
+          ...(p.ai ?? emptyAiState()),
+          result: {
+            kind: 'detections',
+            modelId: 'geco2',
+            model: geco2ModelId(out.size),
+            engine: `onnxruntime-web ${ORT_VERSION} · ${out.backend === 'webgpu' ? 'WebGPU' : 'WASM'}`,
+            inputSize: out.size,
+            scale: sx,
+            objects: mergeAiDetections(prev, fresh),
+            exemplarsUsed: exemplars,
+            inputExemplarIds: exemplars.map((e) => e.id),
+            durationMs: out.durationMs,
+            at: new Date().toISOString(),
+          },
+        },
+      };
+    });
+    setTool('edit');
+  }, [hist.present.ai, session.canvas, commit, t]);
 
   const runAi = useCallback(async () => {
     const ai = hist.present.ai;
@@ -345,6 +414,10 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     }
     try {
       setProgress({ phase: 'ai-run', fraction: 0 });
+      if (aiClient.model === 'geco2') {
+        await runGeco2();
+        return;
+      }
       const exemplars = ai.exemplars;
       const plan = planTiles(session.canvas.width, session.canvas.height, exemplars);
       const scaled = scaledPixels(session.canvas, plan.width, plan.height);
@@ -387,7 +460,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     } finally {
       setProgress(null);
     }
-  }, [hist.present.ai, session.canvas, commit, onError, freeOpenCv, t]);
+  }, [hist.present.ai, session.canvas, commit, onError, freeOpenCv, runGeco2, t]);
 
   /** Sets (or clears) the counting area; size groups are recomputed for the objects inside it. */
   const setCountArea = (area: CountArea | null) =>
@@ -397,7 +470,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     const a = makeCountAreaFromPath(points, project.image.width, project.image.height);
     if (!a) return;
     setCountArea(a);
-    setTool(mode === 'circles' ? 'edit' : 'pan');
+    setTool(mode === 'circles' || detResult ? 'edit' : 'pan');
   };
 
   const onDrawRect = (kind: 'exemplar' | 'region' | 'area', x1: number, y1: number, x2: number, y2: number) => {
@@ -453,6 +526,32 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   };
 
   const regroup = (p: Project): Project => ({ ...p, ...applyGrouping(p.objects, p.groups, p.grouping, p.countArea ?? null) });
+
+  /** Edits a GeCo2 result's detections (Mode B); the result's other fields stay. */
+  const editDetections = (fn: (list: AiDetection[]) => AiDetection[]) =>
+    commit((p) => (isDetectionResult(p.ai?.result) ? { ...p, ai: { ...p.ai!, result: { ...p.ai!.result, objects: fn(p.ai!.result.objects) } } } : p));
+
+  const detHandlers = {
+    onAdd: (x: number, y: number) => {
+      if (!detResult) return;
+      if (!inCountArea(project.countArea, x, y)) {
+        showToast(t.area_outside, false);
+        return;
+      }
+      const ex = project.ai?.exemplars ?? [];
+      const fallback = ex.length ? ex.reduce((a, e) => a + (e.w + e.h) / 2, 0) / ex.length : Math.min(project.image.width, project.image.height) * 0.05;
+      const b = typicalBox(detResult.objects, x, y, fallback);
+      editDetections((list) => [...list, newManualDetection(x, y, b.w, b.h)]);
+      showToast(t.toast_added);
+    },
+    onRemove: (id: string) => {
+      editDetections((list) => removeAiDetection(list, id));
+      showToast(t.toast_removed);
+    },
+    onSelect: () => undefined,
+    onMove: () => undefined,
+    onResize: () => undefined,
+  };
 
   const handlers = {
     onAdd: (x: number, y: number) => {
@@ -549,16 +648,22 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               <button className={tool === 'exemplar' ? 'on' : ''} onClick={() => setTool('exemplar')} role="radio" aria-checked={tool === 'exemplar'} data-testid="tool-exemplar">
                 {t.ai_tool_exemplar}
               </button>
-              <button
-                className={tool === 'region' ? 'on' : ''}
-                onClick={() => setTool('region')}
-                role="radio"
-                aria-checked={tool === 'region'}
-                disabled={!aiResult}
-                data-testid="tool-region"
-              >
-                {t.ai_tool_region}
-              </button>
+              {detResult ? (
+                <button className={tool === 'edit' ? 'on' : ''} onClick={() => setTool('edit')} role="radio" aria-checked={tool === 'edit'} data-testid="tool-ai-edit">
+                  {t.ai_tool_edit}
+                </button>
+              ) : (
+                <button
+                  className={tool === 'region' ? 'on' : ''}
+                  onClick={() => setTool('region')}
+                  role="radio"
+                  aria-checked={tool === 'region'}
+                  disabled={!aiResult}
+                  data-testid="tool-region"
+                >
+                  {t.ai_tool_region}
+                </button>
+              )}
               <button className={tool === 'pan' ? 'on' : ''} onClick={() => setTool('pan')} role="radio" aria-checked={tool === 'pan'}>
                 {t.ai_tool_pan}
               </button>
@@ -605,19 +710,20 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
         <Viewer
           ref={viewerRef}
           image={session.canvas}
-          objects={shownObjects}
-          groups={project.groups}
+          objects={mode === 'ai' ? detShown : shownObjects}
+          groups={mode === 'ai' ? [] : project.groups}
           area={project.countArea ?? null}
-          numbers={showNumbers ? numbers : null}
+          numbers={showNumbers ? (mode === 'ai' ? detNumbers : numbers) : null}
           selectedId={tool === 'select' ? selectedId : null}
           tool={tool}
           showOverlay={showOverlay && !comparing}
           showRejected={showRejected}
           ai={aiOverlay}
+          boxes={mode === 'ai' ? detBoxes : null}
           onDrawRect={onDrawRect}
           onDrawArea={onDrawArea}
           onSelectRegion={setSelectedRegionId}
-          {...handlers}
+          {...(mode === 'ai' ? detHandlers : handlers)}
         />
         {progress && (
           <div className="progress-overlay" role="status" aria-live="polite">
@@ -630,7 +736,9 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                     : progress.phase === 'ai-load'
                       ? t.ai_loading_model
                       : progress.phase === 'ai-run'
-                        ? t.ai_estimating
+                        ? aiModel === 'geco2'
+                          ? t.ai_detecting
+                          : t.ai_estimating
                         : t.analyzing}
               </p>
               <progress value={progress.phase === 'engine' || progress.phase === 'ai-load' ? undefined : progress.fraction} max={1} />
@@ -693,14 +801,20 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
         </div>}
         {mode === 'ai' ? (
           <div className="quickbar">
-            <button className="qb-total" onClick={() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} aria-label={t.ai_estimate_label}>
-              <span className="estimate-tag">{t.ai_estimate_label}</span>{' '}
-              <span className="qb-num" data-testid="quick-estimate">{aiSummary ? t.ai_estimate(roundEstimate(aiSummary.corrected)) : '–'}</span> {t.pcs}
-            </button>
+            {detResult ? (
+              <button className="qb-total" onClick={() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} aria-label={t.ai_det_tag}>
+                <span className="qb-num" data-testid="quick-det-total">{detCount}</span> {t.pcs}
+              </button>
+            ) : (
+              <button className="qb-total" onClick={() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} aria-label={t.ai_estimate_label}>
+                <span className="estimate-tag">{t.ai_estimate_label}</span>{' '}
+                <span className="qb-num" data-testid="quick-estimate">{aiSummary ? t.ai_estimate(roundEstimate(aiSummary.corrected)) : '–'}</span> {t.pcs}
+              </button>
+            )}
             <button className="btn small primary" disabled={!!progress || !aiStatus.downloaded || !(project.ai?.exemplars.length)} onClick={runAi} data-testid="quick-ai-run">
-              {aiResult ? t.ai_rerun : t.ai_run}
+              {aiModel === 'geco2' ? (detResult ? t.ai_rerun_detect : t.ai_run_detect) : aiResult ? t.ai_rerun : t.ai_run}
             </button>
-            {aiResult && (
+            {anyAiResult && (
               <button className="btn small" onClick={() => void exportPng()} title={t.export_png}>
                 ⬇ PNG
               </button>
@@ -791,7 +905,9 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             {tool === 'area'
               ? t.tool_area_hint
               : tool === 'edit'
-              ? t.tool_edit_hint
+              ? mode === 'ai'
+                ? t.ai_tool_edit_hint
+                : t.tool_edit_hint
               : tool === 'select'
                 ? t.tool_select_hint
                 : tool === 'exemplar'
@@ -804,7 +920,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             <label className="toggle">
               <input type="checkbox" checked={showOverlay} onChange={(e) => setShowOverlay(e.target.checked)} /> {t.overlay}
             </label>
-            {mode === 'ai' ? (
+            {mode === 'ai' && !detResult ? (
               <label className="toggle">
                 <input type="checkbox" checked={showHeat} onChange={(e) => setShowHeat(e.target.checked)} /> {t.ai_heat}
               </label>
@@ -860,7 +976,11 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
         {mode === 'ai' ? (
           <>
             <div ref={resultRef}>
-              <AiResultPanel project={project} summary={aiSummary} />
+              {detResult ? (
+                <AiDetectionResultPanel project={project} count={detCount} />
+              ) : aiResult || aiModel === 'loca' ? (
+                <AiResultPanel project={project} summary={aiSummary} />
+              ) : null}
             </div>
             <AiPanel
               project={project}
@@ -870,6 +990,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               running={!!progress}
               onDownload={() => void downloadModel()}
               onDeleteModel={() => void deleteModel()}
+              onChoice={(c) => void aiClient.setChoice(c)}
               onRun={() => void runAi()}
               summary={aiSummary}
               pending={pendingRegion}

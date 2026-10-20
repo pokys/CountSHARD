@@ -1,9 +1,10 @@
 /**
  * Browser exports: annotated PNG, downloads, data URLs.
  */
-import type { AiDensityResult, Project } from '../model/types';
+import { type AiDensityResult, type AiDetectionResult, type Project, inCountArea } from '../model/types';
 import { computeStats, numbering, visibleInArea } from '../state/project';
 import { decodeDensity, roundEstimate, summarize } from '../ai/estimate';
+import { asCountedObjects, boxesOf, countedDetections } from '../ai/geco2';
 import { heatRgba } from '../ai/heatmap';
 import { drawAiOverlay, drawAnnotations, drawCountArea } from './draw';
 import { canvasToBlob } from './image';
@@ -89,9 +90,56 @@ export interface AiLegendText {
  * Mode B PNG: photo + heat map + exemplar boxes + corrected regions, and a legend that
  * states the number is an estimate. No per-object marks are drawn.
  */
+export interface AiDetectionLegendText {
+  title: string;
+  total: (n: number) => string;
+  footer: string;
+}
+
+/** Mode B with GeCo2: photo + numbered detection boxes + exemplars, legend with the count and the model. */
+export async function renderAiDetectionsPng(base: HTMLCanvasElement, p: Project, legend: AiDetectionLegendText): Promise<Blob> {
+  const res = p.ai!.result as AiDetectionResult;
+  const area = p.countArea ?? null;
+  const objects = asCountedObjects(res.objects);
+  const counted = countedDetections(res.objects, area).length;
+  const w = base.width;
+  const unit = Math.max(1, w / 1200);
+  const lineH = 26 * unit;
+  const legendH = Math.round(lineH * 2 + 24 * unit);
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = base.height + legendH;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(base, 0, 0);
+  const ppu = 1 / Math.max(1, w / 1600);
+  drawAnnotations(ctx, objects.filter((o) => inCountArea(area, o.x, o.y)), [], {
+    pxPerUnit: ppu,
+    numbers: numbering(objects, area),
+    selectedId: null,
+    showRejected: false,
+    boxes: boxesOf(res.objects),
+  });
+  drawAiOverlay(ctx, { heat: null, heatWidth: 0, heatHeight: 0, exemplars: res.exemplarsUsed, regions: [] }, ppu);
+  if (area) drawCountArea(ctx, area, base.width, base.height, ppu);
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, base.height, w, legendH);
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  const x0 = 16 * unit;
+  let y = base.height + 12 * unit + lineH / 2;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `700 ${20 * unit}px system-ui, sans-serif`;
+  ctx.fillText(`${legend.title} — ${legend.total(counted)}`, x0, y);
+  y += lineH;
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = `400 ${13 * unit}px system-ui, sans-serif`;
+  ctx.fillText(legend.footer, x0, y);
+  return canvasToBlob(canvas, 'image/png');
+}
+
 export async function renderAiPng(base: HTMLCanvasElement, p: Project, legend: AiLegendText): Promise<Blob> {
   const ai = p.ai!;
-  const res = ai.result!;
+  const res = ai.result as AiDensityResult;
   const sum = summarize(ai, p.countArea ?? null)!;
   const w = base.width;
   const unit = Math.max(1, w / 1200);

@@ -1,9 +1,10 @@
 /**
  * DOM-free serialisation: CSV results and JSON project files (testable in Node).
  */
-import { type Project, isCounted } from '../model/types';
+import { type Project, isCounted, isDetectionResult } from '../model/types';
 import { computeStats, numbering } from '../state/project';
 import { decodeDensity, summarize } from '../ai/estimate';
+import { asCountedObjects, countedDetections } from '../ai/geco2';
 
 export interface CsvOptions {
   /** Decimal separator; Czech Excel expects a comma. Field separator is then ';'. */
@@ -81,12 +82,72 @@ export function toAiCsv(p: Project, o: AiCsvLabels): string {
   return '﻿' + rows.map((r) => r.map(esc).join(sep)).join('\r\n') + '\r\n';
 }
 
+export interface AiDetectionCsvLabels {
+  decimal: ',' | '.';
+  headers: { number: string; x: string; y: string; w: string; h: string; source: string; review: string; score: string; model: string };
+  sourceLabels: Record<'auto' | 'manual', string>;
+  reviewLabels: Record<'unreviewed' | 'confirmed', string>;
+}
+
+/**
+ * Mode B with a detection model (GeCo2): one row per counted object (box in project pixels,
+ * numbered like circle mode), the model on every row so a pasted extract stays traceable.
+ */
+export function toAiDetectionsCsv(p: Project, o: AiDetectionCsvLabels): string {
+  const res = p.ai?.result;
+  const sep = o.decimal === ',' ? ';' : ',';
+  const num = (v: number | null | undefined, digits = 1) => (v === null || v === undefined || Number.isNaN(v) ? '' : v.toFixed(digits).replace('.', o.decimal));
+  const h = o.headers;
+  const rows: string[][] = [[h.number, h.x, h.y, h.w, h.h, h.source, h.review, h.score, h.model]];
+  if (isDetectionResult(res)) {
+    const area = p.countArea ?? null;
+    const numbers = numbering(asCountedObjects(res.objects), area);
+    countedDetections(res.objects, area)
+      .sort((a, b) => numbers.get(a.id)! - numbers.get(b.id)!)
+      .forEach((d) =>
+        rows.push([
+          String(numbers.get(d.id)),
+          num(d.x + d.w / 2),
+          num(d.y + d.h / 2),
+          num(d.w),
+          num(d.h),
+          o.sourceLabels[d.source],
+          o.reviewLabels[d.review === 'confirmed' ? 'confirmed' : 'unreviewed'],
+          num(d.score, 2),
+          res.model,
+        ]),
+      );
+  }
+  const esc = (s: string) => (s.includes(sep) || /["\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+  return '﻿' + rows.map((r) => r.map(esc).join(sep)).join('\r\n') + '\r\n';
+}
+
+/** Machine-readable Mode B detection summary in exported project files. */
+export interface DetectionFileSummary {
+  kind: 'detections';
+  /** False: individually detected objects, reviewed by the user. */
+  isEstimate: false;
+  model: string;
+  engine: string;
+  count: number;
+  auto: number;
+  manual: number;
+}
+
+export function detectionSummary(p: Project): DetectionFileSummary | null {
+  const res = p.ai?.result;
+  if (!isDetectionResult(res)) return null;
+  const c = countedDetections(res.objects, p.countArea ?? null);
+  return { kind: 'detections', isEstimate: false, model: res.model, engine: res.engine, count: c.length, auto: c.filter((d) => d.source === 'auto').length, manual: c.filter((d) => d.source === 'manual').length };
+}
+
 /** Machine-readable Mode B summary in exported project files. */
 export interface EstimateFileSummary {
   kind: 'density-estimate';
   /** Always true: the number is a model estimate, not a count of identified objects. */
   isEstimate: true;
   model: string;
+  engine: string;
   rawEstimate: number;
   correctedEstimate: number;
   regions: { x: number; y: number; w: number; h: number; modelEstimate: number; userCount: number }[];
@@ -100,6 +161,7 @@ export function estimateSummary(p: Project): EstimateFileSummary | null {
     kind: 'density-estimate',
     isEstimate: true,
     model: ai.result!.model,
+    engine: ai.result!.engine,
     rawEstimate: sum.raw,
     correctedEstimate: sum.corrected,
     regions: ai.corrections.flatMap((c) => {
@@ -121,14 +183,17 @@ export interface ProjectFile {
     total: number;
     groups: { label: string; count: number; medianDiameterPx: number; medianDiameterMm: number | null }[];
     mode: 'circles' | 'ai';
-    /** Mode B: the AI estimate (present only when one was computed). */
+    /** Mode B: the AI estimate (LOCA; present only when one was computed). */
     estimate?: EstimateFileSummary;
+    /** Mode B: individually detected objects (GeCo2). */
+    detections?: DetectionFileSummary;
   };
 }
 
 export function toProjectFile(p: Project, imageDataUrl: string): ProjectFile {
   const s = computeStats(p);
   const est = estimateSummary(p);
+  const det = detectionSummary(p);
   return {
     format: 'countshard-project',
     version: 1,
@@ -140,6 +205,7 @@ export function toProjectFile(p: Project, imageDataUrl: string): ProjectFile {
       groups: s.groups.map((g) => ({ label: g.group.label, count: g.count, medianDiameterPx: g.medianDiameterPx, medianDiameterMm: g.medianDiameterMm })),
       mode: p.mode ?? 'circles',
       ...(est ? { estimate: est } : {}),
+      ...(det ? { detections: det } : {}),
     },
   };
 }
@@ -182,7 +248,11 @@ function validateAi(p: Project) {
   if (!Array.isArray(ai.exemplars) || !ai.exemplars.every(box)) throw new ProjectFileError('ai');
   if (!Array.isArray(ai.corrections) || !ai.corrections.every((c) => box(c) && Number.isInteger(c.userCount) && c.userCount >= 0)) throw new ProjectFileError('ai');
   const r = ai.result;
-  if (r) {
+  if (isDetectionResult(r)) {
+    if (!Array.isArray(r.objects) || typeof r.model !== 'string' || !(r.scale > 0)) throw new ProjectFileError('ai');
+    const states = ['unreviewed', 'confirmed', 'rejected'];
+    if (!r.objects.every((d) => box(d) && (d.source === 'auto' || d.source === 'manual') && states.includes(d.review))) throw new ProjectFileError('ai');
+  } else if (r) {
     if (typeof r.density !== 'string' || !(r.gridW > 0) || !(r.gridH > 0) || !(r.cellPx > 0) || !Number.isFinite(r.rawTotal)) throw new ProjectFileError('ai');
     let data: Float32Array;
     try {

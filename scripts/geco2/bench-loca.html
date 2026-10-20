@@ -1,0 +1,24 @@
+<!doctype html>
+<!-- LOCA counterpart of bench.html for GPU-memory comparison: one features + head run (512 tile).
+     Needs ort/ and models/loca-{features,head}-w8.onnx next to it. ?ep=webgpu|wasm -->
+<meta charset="utf-8">
+<title>LOCA bench</title>
+<pre id="out">running…</pre>
+<script type="module">
+import * as ort from './ort/ort.min.mjs';
+const ep = new URLSearchParams(location.search).get('ep') ?? 'webgpu';
+ort.env.wasm.numThreads = 1;
+ort.env.wasm.wasmPaths = new URL('./ort/', location.href).href;
+const get = async (p) => new Uint8Array(await (await fetch(p)).arrayBuffer());
+const o = { executionProviders: [ep], graphOptimizationLevel: 'disabled' };
+const f = await ort.InferenceSession.create(await get('models/loca-features-w8.onnx'), o);
+const h = await ort.InferenceSession.create(await get('models/loca-head-w8.onnx'), o);
+const img = new Float32Array(3 * 512 * 512);
+for (let i = 0; i < img.length; i++) img[i] = Math.sin(i * 0.0007) + Math.cos(i * 0.013);
+const t = performance.now();
+const fo = await f.run({ image: new ort.Tensor('float32', img, [1, 3, 512, 512]) });
+const feat = new ort.Tensor('float32', await fo.features.getData(), [1, 256, 64, 64]);
+const ho = await h.run({ features: feat, exemplar_features: feat, bboxes: new ort.Tensor('float32', new Float32Array([100, 100, 150, 150, 200, 200, 250, 250, 300, 300, 350, 350]), [1, 3, 4]) });
+await ho.density.getData();
+document.getElementById('out').textContent = JSON.stringify({ ep, ms: Math.round(performance.now() - t), done: true });
+</script>

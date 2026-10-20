@@ -18,6 +18,14 @@ export interface DrawOptions {
   defaultColor?: string;
   /** Draw a small marker for unreviewed (automatic) vs confirmed objects. */
   reviewMarks?: boolean;
+  /** Objects with a box (AI detections) are drawn as rectangles of this size around their centre. */
+  boxes?: Map<string, { w: number; h: number }>;
+}
+
+function shapePath(ctx: CanvasRenderingContext2D, obj: CountedObject, grow: number, box?: { w: number; h: number }) {
+  ctx.beginPath();
+  if (box) ctx.rect(obj.x - box.w / 2 - grow, obj.y - box.h / 2 - grow, box.w + 2 * grow, box.h + 2 * grow);
+  else ctx.arc(obj.x, obj.y, obj.r + grow, 0, Math.PI * 2);
 }
 
 export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedObject[], groups: SizeGroup[], o: DrawOptions) {
@@ -35,9 +43,9 @@ export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedO
     if (!counted && !candidate && !o.showRejected) continue;
     const color = candidate ? REVIEW_COLOR : counted ? (obj.groupId && colors.get(obj.groupId)) || o.defaultColor || '#22c55e' : RESERVED_COLORS.rejected;
     const selected = obj.id === o.selectedId;
-    ctx.beginPath();
-    ctx.arc(obj.x, obj.y, obj.r, 0, Math.PI * 2);
-    ctx.lineWidth = Math.max(u * (selected ? 3.5 : 2), obj.r * 0.06);
+    const box = o.boxes?.get(obj.id);
+    shapePath(ctx, obj, 0, box);
+    ctx.lineWidth = Math.max(u * (selected ? 3.5 : 2), obj.r * (box ? 0.04 : 0.06));
     ctx.strokeStyle = color;
     if (!counted) ctx.setLineDash([4 * u, 4 * u]);
     ctx.stroke();
@@ -54,8 +62,7 @@ export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedO
       ctx.fillStyle = REVIEW_COLOR;
       ctx.fillText('?', obj.x, obj.y);
       if (selected) {
-        ctx.beginPath();
-        ctx.arc(obj.x, obj.y, obj.r + 4 * u, 0, Math.PI * 2);
+        shapePath(ctx, obj, 4 * u, box);
         ctx.lineWidth = 2 * u;
         ctx.strokeStyle = '#ffffff';
         ctx.stroke();
@@ -74,8 +81,7 @@ export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedO
       continue;
     }
     if (selected) {
-      ctx.beginPath();
-      ctx.arc(obj.x, obj.y, obj.r + 4 * u, 0, Math.PI * 2);
+      shapePath(ctx, obj, 4 * u, box);
       ctx.lineWidth = 2 * u;
       ctx.strokeStyle = '#ffffff';
       ctx.stroke();

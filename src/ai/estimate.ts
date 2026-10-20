@@ -5,7 +5,7 @@
  * can correct it region by region: inside a corrected region the user's count replaces the
  * model's density sum. Regions may not overlap, so every pixel is counted by exactly one source.
  */
-import { type AiBox, type AiDensityResult, type AiRegionCorrection, type AiState, type CountArea, inCountArea, pointInPolygon } from '../model/types';
+import { type AiBox, type AiDensityResult, type AiRegionCorrection, type AiState, type CountArea, inCountArea, isDensityResult, pointInPolygon } from '../model/types';
 
 export const MAX_EXEMPLARS = 3;
 
@@ -138,7 +138,7 @@ export interface EstimateSummary {
 
 export function summarize(ai: AiState, area: CountArea | null = null): EstimateSummary | null {
   const res = ai.result;
-  if (!res) return null;
+  if (!isDensityResult(res)) return null;
   const data = decodeDensity(res.density);
   // With a counting area only the density inside it counts; corrections whose centre lies
   // outside are ignored, and inside ones replace the model's sum within the area.

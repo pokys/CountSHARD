@@ -41,7 +41,7 @@ export function App() {
   // A Mode B run that killed the page (out of memory on phones) is reported instead of a silent reset.
   useEffect(() => {
     const crash = takeAiCrashReport();
-    if (crash) setError(t.ai_crashed(crash.backend === 'webgpu'));
+    if (crash) setError(crash.model === 'geco2' ? t.ai_crashed_geco2(crash.backend === 'webgpu') : t.ai_crashed(crash.backend === 'webgpu'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -188,3 +188,89 @@ of ≈ 830 MB after a run). Sessions use graph optimisation 'disabled', so int8 
 expanded to fp32 copies. App guards: a "running" marker in localStorage reveals a run that
 killed the page (message on the next start; after a WebGPU crash the device uses WASM); a WebGPU
 error during a run is retried on WASM; the OpenCV worker is stopped in AI mode.
+
+## Mode B — GeCo2 as a second model (feasibility spike, 2026-10-20)
+
+**Question.** Can GeCo2 (AAAI 2026; code MIT, SAM2 Hiera B+ backbone Apache 2.0, official
+weights `CNTQG_multitrain_ca44.pth`) run in the browser next to LOCA, and is it worth it?
+Unlike LOCA it is a *detector*: one box per object, so its results could be shown and
+corrected like circle-mode objects. Scripts and exact numbers: `scripts/geco2/README.md`,
+`docs/testing.md` ("GeCo2 feasibility"). Nothing in the app was changed.
+
+**It can be exported.** Three ONNX graphs (backbone / exemplar prototypes / detection head),
+opset 17, fp32 ONNX gives the same counts as PyTorch. Deformable attention exports as
+plain `GridSample` (the pure-PyTorch path of Deformable-DETR); every op runs on onnxruntime-web
+1.30 WebGPU and WASM (RoIAlign only in the tiny exemplar graph, run on WASM). Weight-only int8
+as for LOCA: **87.4 MB** (backbone 71.3 MB, head 16.0 MB) vs LOCA's 34.9 MB; the backbone
+does not shrink at lower input sizes. GeCo2's optional SAM mask-decoder box refinement (needs
+SAM2 weights, runs per box) is not exported; it changes counts on dense FSC-147 photos by up
+to ≈ 6 % (fewer duplicates after NMS) and not at all on the synthetic scenes.
+
+**Accuracy (same inputs as the LOCA eval).** Synthetic pipe/rod scenes — CountSHARD's actual
+use case — are GeCo2's strength: MAE 1.8 vs LOCA 19.6 (app tiling) / 23.1 (squash), and
+the detections are individually correct (e.g. 260/260 on four mixed sizes from three
+exemplars; 2,496 true + 14 false on 18 px rods). On the FSC-147 sample it is worse than LOCA,
+almost entirely on "tree logs", where it also boxes partly hidden logs that the dataset's
+annotation does not count (MAE 11.7 vs 8.3; on the 2 × 2 log mosaics 69 vs 35). Other FSC
+classes are on par or better.
+
+**Cost — the blocker for phones.**
+- *WASM (1 thread, as on GitHub Pages):* ≈ 100 s per photo at 1024 px and ≈ 835 MB RSS after
+  one run even after making the graphs leaner (Hiera blocks in row bands, head in row
+  stripes); the iPhone already crashed at ≈ 830 MB with LOCA v1. Not usable.
+- *WebGPU (Intel Gen12 iGPU, Chromium):* ≈ 5.5–7 s per photo at 1024 px (warm), which is
+  fine — but the tab then holds ≈ 2.0 GB of GPU memory (LOCA: ≈ 0.8 GB), because
+  onnxruntime-web keeps its buffer pool. On phones GPU memory is the same RAM as the tab's.
+- Two onnxruntime-web WebGPU problems were found: an int64 `Clip` gave wrong row indices
+  (fixed in the export by literal index constants), and the int8 backbone's deepest output
+  deviates locally (up to 0.65) unless intermediates are kept alive — counts were unaffected
+  on the tested photos (217 = 217, 223 = 223), but this must be understood before shipping.
+- 768 / 512 px inputs cut memory and time roughly with the area (WASM, first export: 739 / 556 MB,
+  52 / 22 s). **768 px keeps the accuracy** (synthetic MAE 1.1, FSC-147 14.0); 512 px loses
+  small objects (18 px rods: 641 of 2,496). 768 px is the candidate for phones; its WebGPU
+  footprint was not measured (estimate ≈ 1.1–1.3 GB, scaling the 1024 px figure by area).
+
+**Licence.** Code MIT, backbone Apache 2.0, but the checkpoint's host (Hugging Face dataset
+`jerpelhan/geco2-assets`) carries no licence tag — unclear, to be asked of the authors before
+shipping (not obviously better or worse than LOCA's CC BY-NC backbone).
+
+**Phone test (2026-10-20, iPhone, bench page).** WebGPU at 768 px crashes the Safari tab in
+the first backbone run; **WASM works**: 768 px ≈ 16–17 s, 1024 px ≈ 31 s per photo, counts
+identical to the PC. So on the iPhone the right path is GeCo2 on WASM (768 px by default),
+which overturns "never on WASM" below for this class of CPU. Galaxy A34 5G: WASM works with
+equal counts but takes ≈ 1 min per photo at 768 px (≈ 1.7 min at 1024 px) — usable only as an
+explicit "slow but precise" choice; LOCA stays the default there. Updated plan for stage 2:
+"Automaticky" picks GeCo2 only where a short benchmark predicts ≲ 20–30 s per photo (PC with
+WebGPU: GeCo2 1024 on WebGPU; iPhone-class CPU: GeCo2 768 on WASM), never GeCo2 on WebGPU on
+phones, LOCA otherwise; manual choice of GeCo2 on a slow device shows the expected time.
+
+**Integrated (stage 2, 2026-10-20)** as a second Mode B model next to LOCA (LOCA unchanged):
+- *Choice*: AI panel select "Automaticky" (default) / "LOCA – rychlý odhad" / "GeCo2 – přesnější,
+  jednotlivé kusy", remembered per device. "Automaticky" = GeCo2 when the expected time per photo
+  is ≤ 25 s and the device does not report < 3 GB memory, else LOCA; the panel says which model
+  it chose and why. Expected time: run times measured on the device (averaged), before the
+  first run WebGPU ≈ 8 s or a 180³ float matrix-product benchmark × 0.7 s/ms (calibrated on the
+  test PC: 29.7 ms ↔ 20.8 s; an estimate elsewhere). A manual GeCo2 choice on a slow or
+  memory-poor device shows a warning with the expected time.
+- *Backend*: GeCo2 on WebGPU (1024 px) only on non-mobile devices; phones always WASM at 768 px
+  (WebGPU crashed both phones; WASM works). A WebGPU failure is retried once on WASM and the
+  device then stays on WASM; a crash (run marker with model + backend) shows a message and an
+  "Přepnout na LOCA" button.
+- *Hosting*: the GeCo2 files (≈ 83–87 MB per input size) are not in this repository; the app
+  downloads them from the separate Pages site `pokys.github.io/geco2-bench` (CORS `*`), checks
+  size + SHA-256 and caches them separately. **That repository must stay public and unchanged**
+  while the app uses it (or the URL + hashes in `src/ai/modelStore.ts` move with the files).
+- *Results are objects, not an estimate*: numbered boxes, tap removes/adds, counting area,
+  undo; re-runs keep the user's edits; exports record the model (CSV every row, JSON
+  `summary.detections`, PNG footer). LOCA results stay density estimates; switching models
+  replaces the AI result of the photo.
+- Measured in the browser (Chromium, Intel iGPU): demo photo 162 of 162 on WebGPU 1024 px in
+  5.1 s, and 162 of 162 on WASM 768 px in 20.5 s (benchmark estimate before the run: 22 s).
+
+**Recommendation (before the phone test): GeCo2 only on strong devices with WebGPU, LOCA stays the default and the
+fallback; never GeCo2 on WASM.** Concretely: desktop/laptop with WebGPU → GeCo2 offered and
+"Automaticky" may pick it; iPhone 17 Pro class → the 768 px variant, and only after an
+on-device test shows its GPU footprint survives (estimate: plausible but unmeasured; 1024 px
+at ≈ 2 GB is likely too much); Galaxy A class and any device without WebGPU → LOCA only. Before stage 2: test on the real devices, look for a way to
+cap onnxruntime-web's WebGPU buffer pool (or run the head in two sessions), and track down the
+backbone deviation.

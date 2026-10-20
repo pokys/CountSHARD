@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
-import type { AiState, Project } from '../model/types';
-import type { AiStatus } from '../ai/client';
+import { type AiState, type Project, inCountArea, isDensityResult, isDetectionResult } from '../model/types';
+import { type AiStatus, aiClient } from '../ai/client';
 import { type EstimateSummary, estimateTooLow, exemplarSizeRatio, exemplarsTooDifferent, removeCorrection, removeExemplar, resultIsStale, roundEstimate, setCorrectionCount } from '../ai/estimate';
-import { totalBytes } from '../ai/modelStore';
+import { type AiModelChoice, heavyModelWarning } from '../ai/device';
+import { GECO2_MIN_EXEMPLAR_PX, geco2ExemplarSide } from '../ai/geco2';
 import type { Rect } from '../ai/estimate';
 import type { Commit } from './Workspace';
 
@@ -14,10 +15,38 @@ export interface PendingRegion extends Rect {
 
 const withAi = (p: Project, fn: (ai: AiState) => AiState): Project => ({ ...p, ai: fn(p.ai ?? { exemplars: [], result: null, corrections: [] }) });
 
+/** Result card for a GeCo2 run: individually detected (and user-reviewed) items. */
+export function AiDetectionResultPanel({ project, count }: { project: Project; count: number }) {
+  const { t, fmt } = useI18n();
+  const res = project.ai?.result;
+  if (!isDetectionResult(res)) return null;
+  const inArea = res.objects.filter((d) => inCountArea(project.countArea, d.x + d.w / 2, d.y + d.h / 2));
+  const counted = inArea.filter((d) => d.review !== 'rejected');
+  const small = geco2ExemplarSide(res.exemplarsUsed, res.scale) < GECO2_MIN_EXEMPLAR_PX;
+  return (
+    <section className="card result" aria-live="polite">
+      <div className="total">
+        <span className="label">{t.ai_det_tag}</span>
+        <span className="value" data-testid="ai-det-total">
+          {count}
+        </span>
+        <span className="unit">{t.pcs}</span>
+      </div>
+      <p className="small">
+        {t.ai_det_counts(counted.filter((d) => d.source === 'auto').length, counted.filter((d) => d.source === 'manual').length, inArea.filter((d) => d.review === 'rejected').length)}
+      </p>
+      {project.ai && resultIsStale(project.ai) && <p className="small warn">{t.ai_stale}</p>}
+      {small && <p className="small warn">{t.ai_det_small}</p>}
+      <p className="muted tiny">{t.ai_det_note}</p>
+      <p className="muted tiny">{t.ai_det_info(fmt(res.durationMs / 1000, 1), res.engine, res.inputSize)}</p>
+    </section>
+  );
+}
+
 /** Result card for Mode B: the corrected estimate, clearly labelled as an estimate. */
 export function AiResultPanel({ project, summary }: { project: Project; summary: EstimateSummary | null }) {
   const { t, fmt } = useI18n();
-  const res = project.ai?.result;
+  const res = isDensityResult(project.ai?.result) ? project.ai!.result : null;
   return (
     <section className="card result" aria-live="polite">
       <div className="total">
@@ -55,6 +84,7 @@ export function AiPanel({
   running,
   onDownload,
   onDeleteModel,
+  onChoice,
   onRun,
   summary,
   pending,
@@ -70,6 +100,7 @@ export function AiPanel({
   running: boolean;
   onDownload(): void;
   onDeleteModel(): void;
+  onChoice(c: AiModelChoice): void;
   onRun(): void;
   summary: EstimateSummary | null;
   pending: PendingRegion | null;
@@ -82,18 +113,77 @@ export function AiPanel({
   const { t, fmt } = useI18n();
   const ai = project.ai;
   const exemplars = ai?.exemplars ?? [];
-  const mb = fmt(totalBytes() / 1e6, 0);
+  const mb = fmt(status.missingBytes / 1e6, 0);
   const dl = status.downloading;
   const [count, setCount] = useState('');
   useEffect(() => setCount(pending?.model !== null && pending?.model !== undefined ? String(roundEstimate(pending.model)) : ''), [pending]);
   const countVal = Number(count);
+  const geco2 = status.decision?.model === 'geco2';
+  const plan = status.geco2;
+  const backendName = (b: 'webgpu' | 'wasm') => (b === 'webgpu' ? 'WebGPU' : 'WASM');
+  const sec = (s: number | null | undefined) => fmt(s ?? 0, 0);
+  const why = status.decision?.reason;
+  const autoText =
+    status.choice !== 'auto' || !status.decision
+      ? null
+      : why === 'geco2-fast' && plan
+        ? t.ai_auto_geco2(sec(plan.seconds), backendName(plan.backend))
+        : why === 'geco2-slow'
+          ? t.ai_auto_loca_slow(sec(plan?.seconds))
+          : why === 'low-memory'
+            ? t.ai_auto_loca_memory
+            : t.ai_auto_loca_unknown;
+  const warn = status.choice === 'geco2' && status.profile ? heavyModelWarning(status.profile) : null;
+  const densityResult = isDensityResult(ai?.result) ? ai!.result : null;
 
   return (
     <section className="card">
-      <h2>{t.ai_title}</h2>
-      <p className="muted small">{t.ai_intro}</p>
+      <h2>{geco2 ? t.ai_title_geco2 : t.ai_title}</h2>
+      <p className="muted small">{geco2 ? t.ai_intro_geco2 : t.ai_intro}</p>
 
-      {!status.downloaded && (
+      {status.crash?.model === 'geco2' && (
+        <div className="banner warn small" data-testid="ai-crash-geco2">
+          <p>{t.ai_crash_geco2}</p>
+          <div className="row wrap">
+            {status.choice !== 'loca' && (
+              <button
+                className="btn small primary"
+                onClick={() => {
+                  aiClient.dismissCrash();
+                  onChoice('loca');
+                }}
+              >
+                {t.ai_switch_loca}
+              </button>
+            )}
+            <button className="btn small ghost" onClick={() => aiClient.dismissCrash()}>
+              {t.ai_dismiss}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <label className="stack">
+        <span className="small">{t.ai_model_label}</span>
+        <select value={status.choice} disabled={running || !!dl} onChange={(e) => onChoice(e.target.value as AiModelChoice)} data-testid="ai-model">
+          <option value="auto">{t.ai_model_auto}</option>
+          <option value="loca">{t.ai_model_loca}</option>
+          <option value="geco2">{t.ai_model_geco2}</option>
+        </select>
+      </label>
+      {status.choice === 'auto' && !status.decision && <p className="muted tiny">{t.ai_auto_checking}</p>}
+      {autoText && <p className="muted tiny" data-testid="ai-auto-reason">{autoText}</p>}
+      {status.choice === 'geco2' && plan?.seconds !== null && plan?.seconds !== undefined && !warn && (
+        <p className="muted tiny">{t.ai_geco2_time(sec(plan.seconds), plan.measured)}</p>
+      )}
+      {warn && (
+        <p className="small warn" data-testid="ai-heavy-warn">
+          {warn.kind === 'memory' ? t.ai_geco2_warn_memory : t.ai_geco2_warn_slow(sec(warn.seconds))}
+        </p>
+      )}
+      <p className="muted tiny">{t.ai_model_note}</p>
+
+      {!status.downloaded && status.decision && (
         <div className="ai-download">
           <button className="btn primary" disabled={!!dl} onClick={onDownload} data-testid="ai-download">
             {dl ? t.ai_downloading(Math.floor((100 * dl.loaded) / Math.max(1, dl.total))) : t.ai_download(mb)}
@@ -125,12 +215,12 @@ export function AiPanel({
         </p>
       )}
       <button className="btn primary" disabled={running || !status.downloaded || exemplars.length === 0} onClick={onRun} data-testid="ai-run">
-        {ai?.result ? t.ai_rerun : t.ai_run}
+        {geco2 ? (isDetectionResult(ai?.result) ? t.ai_rerun_detect : t.ai_run_detect) : densityResult ? t.ai_rerun : t.ai_run}
       </button>
       {status.downloaded && exemplars.length === 0 && <p className="muted tiny">{t.ai_need_exemplar}</p>}
-      {status.backend === 'wasm' && <p className="muted tiny">{t.ai_time_hint}</p>}
+      {!geco2 && status.backend === 'wasm' && <p className="muted tiny">{t.ai_time_hint}</p>}
 
-      {ai?.result && (
+      {densityResult && ai && (
         <>
           <h3 className="small">{t.ai_corrections_title}</h3>
           <p className="muted tiny">{t.ai_corrections_hint}</p>
@@ -181,7 +271,7 @@ export function AiPanel({
         </>
       )}
 
-      <p className="muted tiny">{t.ai_licence}</p>
+      <p className="muted tiny">{geco2 ? t.ai_licence_geco2 : t.ai_licence}</p>
       {status.downloaded && !running && (
         <button className="btn ghost small" onClick={onDeleteModel}>
           {t.ai_delete}

@@ -1,0 +1,128 @@
+<!doctype html>
+<!-- GeCo2 browser bench. Serve a folder containing this file, ort/ (onnxruntime-web dist),
+     models/geco2-*.onnx and inputs/ (run_onnx.py dump). Open
+     bench.html?case=4951-1024&size=1024&variant=w8&ep=webgpu&runs=2 ; results appear as JSON in <pre>. -->
+<meta charset="utf-8">
+<title>GeCo2 bench</title>
+<pre id="out">running…</pre>
+<script type="module">
+import * as ort from './ort/ort.min.mjs';
+const q = new URLSearchParams(location.search);
+const S = Number(q.get('size') ?? 1024), variant = q.get('variant') ?? 'w8', ep = q.get('ep') ?? 'webgpu';
+const runs = Number(q.get('runs') ?? 2), key = q.get('case') ?? `4951-${S}`;
+const log = [];
+const out = document.getElementById('out');
+const show = (o) => { out.textContent = JSON.stringify(o, null, 1); };
+ort.env.wasm.numThreads = 1;
+ort.env.wasm.wasmPaths = new URL('./ort/', location.href).href;
+ort.env.logLevel = 'warning';
+const origWarn = console.warn;
+console.warn = (...a) => { log.push(a.join(' ').slice(0, 300)); origWarn(...a); };
+const get = async (p) => new Uint8Array(await (await fetch(p)).arrayBuffer());
+const f32 = async (p) => new Float32Array((await get(p)).buffer);
+
+function detect(obj, ltrb, H, W, content, size) {
+  let max = -Infinity;
+  for (const v of obj) if (v > max) max = v;
+  const cand = [];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const v = obj[y * W + x];
+    if (!(v > max / 8)) continue;
+    let peak = true;
+    for (let dy = -1; dy <= 1 && peak; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const yy = y + dy, xx = x + dx;
+      if (yy < 0 || xx < 0 || yy >= H || xx >= W) continue;
+      if (obj[yy * W + xx] > v) { peak = false; break; }
+    }
+    if (!peak || !(v > max * 0.11)) continue;
+    const i = y * W + x, n = H * W, cx = x / W, cy = y / H;
+    cand.push({ v, b: [cx - ltrb[i], cy - ltrb[n + i], cx + ltrb[2 * n + i], cy + ltrb[3 * n + i]] });
+  }
+  cand.sort((a, b) => b.v - a.v);
+  const keep = [];
+  const area = (b) => (b[2] - b[0]) * (b[3] - b[1]);
+  for (const c of cand) {
+    let ok = true;
+    for (const k of keep) {
+      const iw = Math.min(c.b[2], k.b[2]) - Math.max(c.b[0], k.b[0]), ih = Math.min(c.b[3], k.b[3]) - Math.max(c.b[1], k.b[1]);
+      const inter = Math.max(0, iw) * Math.max(0, ih);
+      if (inter / (area(c.b) + area(k.b) - inter) > 0.5) { ok = false; break; }
+    }
+    if (ok) keep.push(c);
+  }
+  return keep.filter((c) => {
+    const b = c.b.map((v) => Math.min(1, Math.max(0, v)));
+    return ((b[0] + b[2]) / 2) * size < content[0] && ((b[1] + b[3]) / 2) * size < content[1];
+  }).length;
+}
+
+async function debugRun(graph) {
+  // Compare fingerprints of exposed intermediates (debug_outputs.py add/ref) with the CPU run.
+  const meta = await (await fetch(`inputs/${key}.json`)).json();
+  const ref = await (await fetch(`inputs/${key}.dbg-${graph}.json`)).json();
+  const s = await ort.InferenceSession.create(await get(`models/debug-${graph}-${S}.onnx`), { executionProviders: [ep], graphOptimizationLevel: 'disabled' });
+  const T = async (n, dims) => new ort.Tensor('float32', await f32(`inputs/${key}.${n}.bin`), dims);
+  const k2 = meta.boxes.length / 2;
+  const feeds = graph === 'backbone' ? { image: await T('img', [1, 3, S, S]) } : {
+    feat: await T('feat', [1, 256, S / 16, S / 16]), fpn1: await T('fpn1', [1, 256, S / 8, S / 8]), fpn0: await T('fpn0', [1, 256, S / 4, S / 4]),
+    proto0: await T('proto0', [1, k2, 256]), proto1: await T('proto1', [1, k2, 256]), proto2: await T('proto2', [1, k2, 256]),
+  };
+  const o = await s.run(feeds);
+  const rows = [];
+  for (const [n, r] of Object.entries(ref)) {
+    const d = await o[n].getData();
+    let sum = 0, abs = 0, md = 0, mx = 0, j = 0;
+    for (let i = 0; i < d.length; i++) { sum += d[i]; abs += Math.abs(d[i]); }
+    for (let i = 0; i < d.length; i += 997, j++) { md = Math.max(md, Math.abs(d[i] - r.sample[j])); mx = Math.max(mx, Math.abs(r.sample[j])); }
+    rows.push([n, (abs - r.abs) / Math.max(1e-9, r.abs), md, mx]);
+  }
+  show({ key, ep, graph, rows: rows.map((r) => `${r[0]}  absSum rel ${r[1].toExponential(2)}  sample maxdiff ${r[2].toExponential(2)} of ${r[3].toFixed(3)}`) });
+}
+
+try {
+  if (q.get('debug')) { await debugRun(q.get('debug')); throw 'done'; }
+  const meta = await (await fetch(`inputs/${key}.json`)).json();
+  const img = await f32(`inputs/${key}.img.bin`);
+  const ref = await f32(`inputs/${key}.obj.bin`);
+  const opts = { executionProviders: [ep], graphOptimizationLevel: q.get('opt') ?? 'disabled' };
+  const t0 = performance.now();
+  const sess = [];
+  for (const k of ['backbone', 'exemplars', 'head']) {
+    sess.push(await ort.InferenceSession.create(await get(`models/geco2-${k}-${S}-${variant}.onnx`), k === 'exemplars' ? { ...opts, executionProviders: ['wasm'] } : opts));
+  }
+  const [b, e, h] = sess;
+  const res = { key, ep, variant, size: S, gt: meta.gt, cpu_count: meta.cpu_count, create_ms: Math.round(performance.now() - t0), runs: [] };
+  for (let r = 0; r < runs; r++) {
+    let t = performance.now();
+    const f = await b.run({ image: new ort.Tensor('float32', img, [1, 3, S, S]) });
+    const feat = {};
+    const diffs = {};
+    for (const k of ['feat', 'fpn1', 'fpn0']) {
+      const d = await f[k].getData();
+      if (q.get('isolate')) {
+        // Compare with the CPU backbone output, then feed the CPU output to the head.
+        const c = await f32(`inputs/${key}.${k}.bin`);
+        let m = 0, mx = 0;
+        for (let i = 0; i < c.length; i++) { m = Math.max(m, Math.abs(c[i] - d[i])); mx = Math.max(mx, Math.abs(c[i])); }
+        diffs[k] = [m, mx];
+        feat[k] = new ort.Tensor('float32', c, f[k].dims);
+      } else feat[k] = new ort.Tensor('float32', d, f[k].dims);
+    }
+    const tb = performance.now() - t;
+    t = performance.now();
+    const p = await e.run({ ...feat, boxes: new ort.Tensor('float32', new Float32Array(meta.boxes), [1, meta.boxes.length / 4, 4]) });
+    const o = await h.run({ ...feat, proto0: p.proto0, proto1: p.proto1, proto2: p.proto2 });
+    const obj = await o.objectness.getData(), ltrb = await o.ltrb.getData();
+    const th = performance.now() - t;
+    let mad = 0, mx = 0;
+    for (let i = 0; i < obj.length; i++) { mad = Math.max(mad, Math.abs(obj[i] - ref[i])); mx = Math.max(mx, Math.abs(ref[i])); }
+    const H = o.objectness.dims[2], W = o.objectness.dims[3];
+    res.runs.push({ backbone_ms: Math.round(tb), head_ms: Math.round(th), count: detect(obj, ltrb, H, W, meta.content, S), obj_max_abs_diff_vs_cpu: mad, obj_max: mx, backbone_diff_vs_cpu: diffs });
+    show({ ...res, log });
+  }
+  res.done = true;
+  show({ ...res, log });
+} catch (err) {
+  if (err !== 'done') show({ error: String(err && err.stack || err), log });
+}
+</script>

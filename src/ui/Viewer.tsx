@@ -22,6 +22,11 @@ interface Props {
   showRejected: boolean;
   /** Mode B overlay. When set, the photo shows the density estimate instead of circles. */
   ai?: AiOverlay | null;
+  /**
+   * Mode B with a detection model: `objects` are the detections, drawn as these boxes and edited
+   * with the 'edit' tool like circle mode (tap removes / adds).
+   */
+  boxes?: Map<string, { w: number; h: number }> | null;
   /** Mode B: a rectangle was drawn with the exemplar or region tool (image coordinates). */
   onDrawRect?(kind: 'exemplar' | 'region' | 'area', x1: number, y1: number, x2: number, y2: number): void;
   /** Counting area (both modes): the outside is dimmed. */
@@ -95,6 +100,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     ctx.drawImage(p.image, 0, 0);
     if (p.ai) {
       if (p.showOverlay) {
+        if (p.boxes) {
+          drawAnnotations(ctx, p.objects, p.groups, {
+            pxPerUnit: v.s,
+            numbers: p.numbers,
+            selectedId: null,
+            showRejected: p.showRejected,
+            reviewMarks: true,
+            boxes: p.boxes,
+          });
+        }
         const g = gesture.current;
         const draft =
           g.kind === 'rect' && g.tool !== 'area'
@@ -219,7 +234,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       gesture.current = { kind: 'lasso', pts: [[pt.x, pt.y]] };
       return;
     }
-    if (p.ai) {
+    if (p.ai && p.tool !== 'edit') {
       if ((p.tool === 'exemplar' || p.tool === 'region') && p.showOverlay) {
         gesture.current = { kind: 'rect', tool: p.tool, x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y };
         return;
@@ -317,7 +332,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       if (Math.abs(pt.x - g.x0) * view.current.s > TAP_SLOP && Math.abs(pt.y - g.y0) * view.current.s > TAP_SLOP) p.onDrawRect?.(g.tool, g.x0, g.y0, pt.x, pt.y);
       return;
     }
-    if (g.kind === 'tap-or-pan' && !g.moved && p.ai) {
+    if (g.kind === 'tap-or-pan' && !g.moved && p.ai && p.tool !== 'edit') {
       const r = p.ai.regions.find((q) => pt.x >= q.x && pt.x <= q.x + q.w && pt.y >= q.y && pt.y <= q.y + q.h);
       p.onSelectRegion?.(r?.id ?? null);
       return;

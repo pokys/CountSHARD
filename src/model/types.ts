@@ -126,8 +126,9 @@ export interface MultiShotInfo {
 
 /**
  * Counting mode. `circles` = Mode A (round-end detector, individually editable objects).
- * `ai` = Mode B (generic objects, LOCA density estimate). The two never mix: an AI result is
- * a density map and a total ESTIMATE, never a list of individually identified objects.
+ * `ai` = Mode B (generic objects from exemplars). Its result is either a LOCA density map with a
+ * total ESTIMATE (no individual objects), or GeCo2 detections (individual, editable boxes).
+ * Circle objects and AI results never mix.
  */
 export type CountMode = 'circles' | 'ai';
 
@@ -170,10 +171,49 @@ export interface AiDensityResult {
   at: string;
 }
 
+/**
+ * One object found by a detection model (GeCo2), project pixels. Edited like circle-mode
+ * objects: removing an automatic one marks it rejected, a tap adds a manual one.
+ */
+export interface AiDetection extends AiBox {
+  /** Objectness score of the model (not a probability). Absent for manual ones. */
+  score?: number;
+  source: DetectionSource;
+  review: ReviewState;
+}
+
+/** Result of a detection model: individual objects, counted (not an estimate). */
+export interface AiDetectionResult {
+  kind: 'detections';
+  /** Model id, e.g. 'geco2'. */
+  modelId: string;
+  /** Model description recorded with the result (name, export, input size). */
+  model: string;
+  engine: string;
+  /** Model input size (S × S). */
+  inputSize: number;
+  /** Model-input pixels per project pixel. */
+  scale: number;
+  objects: AiDetection[];
+  exemplarsUsed: AiBox[];
+  inputExemplarIds: string[];
+  durationMs: number;
+  at: string;
+}
+
+export type AiResult = AiDensityResult | AiDetectionResult;
+
+export function isDetectionResult(r: AiResult | null | undefined): r is AiDetectionResult {
+  return !!r && r.kind === 'detections';
+}
+export function isDensityResult(r: AiResult | null | undefined): r is AiDensityResult {
+  return !!r && r.kind !== 'detections';
+}
+
 export interface AiState {
   /** 1–3 exemplar boxes drawn by the user. */
   exemplars: AiBox[];
-  result: AiDensityResult | null;
+  result: AiResult | null;
   /** Non-overlapping regions with a user count. */
   corrections: AiRegionCorrection[];
 }

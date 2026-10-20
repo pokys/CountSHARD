@@ -8,6 +8,9 @@
 | ONNX Runtime Web (`onnxruntime-web`), © Microsoft Corporation | 1.30.0 | MIT | `assets/ai.worker-*.js`, `assets/ort-wasm-simd-threaded.jsep-*.wasm` (WASM downloaded only when AI counting is first used) |
 | LOCA model code (architecture, re-exported to ONNX), © 2023 Nikola Đukić | `main` (2023) | MIT | graph structure of `models/loca/*.onnx` |
 | **LOCA few-shot weights** (int8 re-quantised) | checkpoint `loca_few_shot.pt` | **derived from SwAV ResNet-50 weights, CC BY-NC 4.0 — non-commercial use only** | `models/loca/loca-features-w8.onnx`, `models/loca/loca-head-w8.onnx` (downloaded only when AI counting is first used) |
+| GeCo2 model code (architecture, re-exported to ONNX), © 2025 jerpelhan | `main` (commit `67d27e8`, 2026) | MIT | graph structure of `geco2-*-w8.onnx` (served from <https://pokys.github.io/geco2-bench/models/>, downloaded only when GeCo2 is first used) |
+| SAM2 Hiera B+ image encoder (backbone of GeCo2), © Meta Platforms, Inc. | `sam2_hiera_base_plus` (2024) | Apache-2.0 | `geco2-backbone-*-w8.onnx` |
+| **GeCo2 weights** (int8 re-quantised) | checkpoint `CNTQG_multitrain_ca44.pth` | **not stated by the authors** (see below) | `geco2-{backbone,exemplars,head}-{768,1024}-w8.onnx` |
 
 Build/test-only tools (not shipped): Vite 5.4 (MIT), Vitest 2.1 (MIT), TypeScript 5.6
 (Apache-2.0), `@vitejs/plugin-react` (MIT), `vite-plugin-pwa` (MIT), `jpeg-js` 0.4.4
@@ -30,6 +33,15 @@ weights (decision recorded 2026-10-20, see `docs/technical-decisions.md`). Chang
 the weights: conversion to ONNX and int8 weight-only quantisation (`scripts/loca/`). No
 retraining. The rest of CountSHARD (Mode A, round objects) does not depend on these weights.
 
+GeCo2 (optional second model) — J. Pelhan, A. Lukežič, M. Kristan, "Generalized-Scale Object
+Counting with Gradual Query Aggregation", AAAI 2026, <https://github.com/jerpelhan/GECO2>. The
+code is MIT-licensed; its backbone is Meta's SAM2 Hiera B+ (Apache-2.0). The weights are
+published at huggingface.co/datasets/jerpelhan/geco2-assets without a stated licence (checked
+2026-10-20); they were trained on counting datasets whose images come from the web. Changes:
+conversion to ONNX (three graphs) and int8 weight-only quantisation (`scripts/geco2/`). The
+files are not in this repository; the app downloads them from a separate site on first use.
+Ask the authors before any commercial use.
+
 ## Licence texts
 
 ### Apache-2.0 (OpenCV)
@@ -39,10 +51,13 @@ NOTICE file. The OpenCV licence is available at <https://github.com/opencv/openc
 and in `node_modules/@techstark/opencv-js/LICENSE` after `npm install`; the deployment
 workflow ships it as `OPENCV-LICENSE.txt`.
 
-### MIT (ONNX Runtime Web; LOCA code)
+SAM2 (GeCo2 backbone) is Apache-2.0 as well: <https://github.com/facebookresearch/sam2/blob/main/LICENSE>.
+
+### MIT (ONNX Runtime Web; LOCA code; GeCo2 code)
 
 Copyright (c) Microsoft Corporation (ONNX Runtime).
 Copyright (c) 2023 Nikola Đukić (LOCA).
+Copyright (c) 2025 jerpelhan (GeCo2).
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this
 software and associated documentation files (the "Software"), to deal in the Software

@@ -37,8 +37,15 @@ the browser.*
   result is shown as a density heat map and a total labelled as an **estimate** — objects
   are not individually identified — and can be corrected region by region. The model
   (≈ 63 MB with its runtime) is downloaded only when first used, then works offline.
-  **The AI model's weights are for non-commercial use only** (CC BY-NC 4.0 via SwAV) —
+  **The LOCA weights are for non-commercial use only** (CC BY-NC 4.0 via SwAV) —
   see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+  A second model, **GeCo2**, finds individual items instead: each gets a numbered box that
+  can be removed or added by a tap, like in round-object mode. The AI panel offers
+  *Automaticky* (default: chosen per device from WebGPU, memory and a short speed test),
+  *LOCA – rychlý odhad* and *GeCo2 – přesnější, jednotlivé kusy*. GeCo2 (≈ 80–90 MB) runs on
+  the graphics card on computers (≈ 6 s per photo) and on the processor on phones (iPhone
+  ≈ 16 s, Galaxy A34 ≈ 1 min); its files are served from a separate site
+  (<https://pokys.github.io/geco2-bench/>), not from this repository.
 
 Not yet: Live Scan, PDF reports — see [docs/roadmap.md](docs/roadmap.md).
 
@@ -101,4 +108,6 @@ mode work from the published link.
 
 Code: [MIT](LICENSE). Third-party components: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 The AI model files in `public/models/loca/` are derived from non-commercially licensed
-weights (CC BY-NC 4.0) and are **not** covered by the MIT licence.
+weights (CC BY-NC 4.0) and are **not** covered by the MIT licence. The GeCo2 model files
+(downloaded from a separate site) are not covered by it either; their weights' licence is not
+stated by their authors.
