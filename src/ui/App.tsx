@@ -8,6 +8,7 @@ import { dataUrlToBlob } from '../io/export';
 import { ProjectFileError, parseProjectFile } from '../io/serialize';
 import { makeDemoImage } from '../demo/demoImage';
 import { analysisClient } from '../analysis/client';
+import { takeAiCrashReport } from '../ai/client';
 import { StartScreen } from './StartScreen';
 import { Workspace } from './Workspace';
 import { OfflineBadge } from './OfflineBadge';
@@ -35,6 +36,13 @@ export function App() {
 
   const refreshRecent = useCallback(() => {
     listProjects().then(setRecent).catch(() => setRecent([]));
+  }, []);
+
+  // A Mode B run that killed the page (out of memory on phones) is reported instead of a silent reset.
+  useEffect(() => {
+    const crash = takeAiCrashReport();
+    if (crash) setError(t.ai_crashed(crash.backend === 'webgpu'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -134,6 +142,7 @@ export function App() {
           key={session.project.id}
           session={session}
           onEngineLoaded={() => setEngineLoaded(true)}
+          onEngineUnloaded={() => setEngineLoaded(false)}
           onError={setError}
           onNewPhoto={() => {
             setSession(null);

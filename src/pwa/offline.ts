@@ -17,6 +17,9 @@ async function cachedUrls(): Promise<string[]> {
   if (!('caches' in window)) return [];
   const urls: string[] = [];
   for (const name of await caches.keys()) {
+    // AI caches are checked by ai/modelStore. caches.open() would also re-create an old AI cache
+    // that modelStore is deleting at the same moment.
+    if (name.startsWith('countshard-ai-')) continue;
     const c = await caches.open(name);
     for (const req of await c.keys()) urls.push(req.url);
   }

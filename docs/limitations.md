@@ -87,12 +87,20 @@ FSC-147 images and 12 mosaics of them (`testing.md`); no real photos of the targ
   needs, which is less informative than 3 different ones.
 - Very small objects relative to the photo are processed at a reduced scale once the
   16-tile limit is reached; the result then warns that the estimate may be low.
-- **Speed:** ≈ 3 s per 512 px tile with WebGPU on an Intel Gen12 laptop iGPU, ≈ 5 s per tile
-  on single-thread WASM (desktop CPU, measured in Node); phones without WebGPU will be
-  several times slower. A 16-tile photo can take minutes on WASM. Multi-threaded WASM is
-  not available on GitHub Pages (no cross-origin isolation).
-- **Memory:** the int8 model is expanded to fp32 when loaded (≈ 140 MB plus activations);
-  low-memory phones may fail to create the session.
+- **Speed:** ≈ 2.9 s per 512 px tile with WebGPU on an Intel Gen12 laptop iGPU, ≈ 7 s per
+  tile on single-thread WASM in Chromium on a desktop CPU (≈ 5 s in Node); phones without
+  WebGPU will be several times slower. A 16-tile photo can take minutes on WASM.
+  Multi-threaded WASM is not available on GitHub Pages (no cross-origin isolation).
+- **Memory:** ≈ 310 MB process RSS after an estimate with the WASM backend (measured in Node,
+  `node scripts/ai-mem-probe.mjs disabled`). WASM memory never shrinks, so this stays for the
+  life of the AI worker. The first release needed ≈ 830 MB because the image encoder's
+  attention over 64 × 64 tokens built 8 × 4096 × 4096 float matrices (512 MB). iOS Safari
+  killed the tab, which looked like a silent reload. Fixed 2026-10-20 (chunked attention,
+  see `scripts/loca/README.md`). Memory on real phones and with WebGPU (GPU memory) was not
+  measured. Phones with little memory may still fail; the app then reports it after the
+  reload, and if it happened on WebGPU, it uses WASM from then on. A WebGPU error during an
+  estimate is retried once on WASM. The OpenCV engine (Mode A) is stopped while AI mode is
+  used, to free its memory; it restarts on the next circle analysis.
 - **Download:** ≈ 63 MB on first use (35 MB model + 28 MB ONNX Runtime WASM). Clearing site
   data removes it; the panel offers re-download and deletion.
 - **Licence:** the weights derive from CC BY-NC 4.0 SwAV weights — non-commercial use only.

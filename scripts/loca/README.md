@@ -19,7 +19,7 @@ venv/Scripts/python -m pip install torch torchvision --index-url https://downloa
 venv/Scripts/python -m pip install onnx onnxruntime onnxscript numpy scipy pillow
 # FSC_DIR (optional): folder with images/<name>.jpg and annotation_FSC147_384.json; the first
 # six images (sorted) become the verification samples. Without it, one random tensor is used.
-FSC_DIR=... venv/Scripts/python -I export_loca.py <loca-main> loca_few_shot.pt out
+ATTN_CHUNK=256 FSC_DIR=... venv/Scripts/python -I export_loca.py <loca-main> loca_few_shot.pt out
 venv/Scripts/python -I quant_verify.py out
 ```
 
@@ -34,6 +34,22 @@ venv/Scripts/python -I quant_verify.py out
 - `PositionalEncodingsFixed` cumsums a bool mask, which ONNX `CumSum` rejects; the script
   replaces it with the same maths on a float mask. The ImageNet/SwAV download in LOCA's
   backbone constructor is disabled (the checkpoint already contains all weights).
+- **Memory-bounded attention** (`ATTN_CHUNK=256`, v2, 2026-10-20). The 3 transformer encoder
+  layers attend over 64 × 64 = 4096 tokens; `nn.MultiheadAttention` exports one
+  8 × 4096 × 4096 score tensor (512 MB) per layer, which killed iOS Safari tabs (onnxruntime-web
+  WASM: 832 MB RSS after one features run). The script replaces the encoder's self-attention
+  with the same maths for 256 queries at a time (all 8 heads batched): largest score tensor
+  8 × 256 × 4096 × 4 B = 32 MB. Measured: 307 MB RSS after a features + head run
+  (`node scripts/ai-mem-probe.mjs disabled`; 347 MB with graph optimisation 'all').
+  Weights are unchanged (the head graph is byte-identical). Density sums vs the v1 graph on
+  the 20 FSC-147 eval images: max difference 9.0e-6, mean 2.1e-6 (max per-pixel 1.2e-8).
+- **WebGPU pitfalls found on the way** (onnxruntime-web 1.30, Intel Gen12, Chromium):
+  `Concat` with ≥ 8 inputs returns wrong data (exact with 4 inputs or a pairwise tree), so
+  the chunk results are concatenated pairwise and the export asserts no `Concat` has ≥ 8
+  inputs. A first per-head variant (Gather + 2-D MatMul, 1024-query chunks) gave a
+  different count on WebGPU (149 vs 162 on the demo photo), most likely for the same reason
+  (it stacked the 8 heads in one `Concat`). The shipped v2
+  features on WebGPU vs WASM: max difference 1.3e-5 (feature magnitude ≈ 0.4).
 - Legacy TorchScript exporter, opset 17. torchvision's RoIAlign is exported with
   `sampling_ratio = 0` (adaptive), which equals torchvision's default `-1`.
 - **Weight-only int8**: every Conv/MatMul/Gemm weight with ≥ 1024 elements is stored as int8
@@ -60,5 +76,7 @@ exemplars each. "count" = sum of the density map.
   difference up to 6.0e-3 (38 % of that image's peak density on 4951, 5–14 % on the others) —
   the map is locally noisier, the sums stay close. The error comes from the quantised
   `features` graph (int8 head + fp32 features: ≤ 0.4 difference).
-- Speed (CPU, 1 thread, native ORT): features ≈ 2.2 s, head ≈ 0.2 s per 512 × 512 tile.
+- v2 (chunked attention), int8, native ORT: within 0.08 of the v1 int8 counts above (e.g. 4951:
+  183.42 vs 183.50; different summation order). In onnxruntime-web WASM the v1 and v2 sums differ by < 1e-5.
+- Speed (CPU, 1 thread, native ORT): features ≈ 2.2 s (v2 ≈ 1.9 s), head ≈ 0.2 s per tile.
   onnxruntime-web 1.30 WASM in Node: features ≈ 4.9 s, head ≈ 0.4 s.

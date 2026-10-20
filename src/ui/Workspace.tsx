@@ -33,6 +33,8 @@ import type { AiOverlay } from '../io/draw';
 interface Props {
   session: Session;
   onEngineLoaded(): void;
+  /** The OpenCV worker was terminated (AI mode frees its memory). */
+  onEngineUnloaded(): void;
   onError(msg: string | null): void;
   onNewPhoto(): void;
 }
@@ -55,7 +57,7 @@ function scaledPixels(canvas: HTMLCanvasElement, w: number, h: number): ImageDat
   return ctx.getImageData(0, 0, w, h);
 }
 
-export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Props) {
+export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, onNewPhoto }: Props) {
   const { t, fmt } = useI18n();
   const [hist, setHist] = useState<History<Project>>(() => initHistory(session.project));
   const project = hist.present;
@@ -286,10 +288,18 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
   const heat = useMemo(() => (aiResult ? heatCanvas(aiResult) : null), [aiResult]);
   const [showHeat, setShowHeat] = useState(true);
 
+  // Phones kill the tab when OpenCV's WASM heap and the AI model are both resident, so the
+  // OpenCV worker is terminated in AI mode; it is restarted on the next circle analysis.
+  const freeOpenCv = useCallback(() => {
+    analysisClient.cancel();
+    onEngineUnloaded();
+  }, [onEngineUnloaded]);
+
   const setMode = (m: 'circles' | 'ai') => {
     if (m === mode) return;
     if (progress) return;
     commit((p) => ({ ...p, mode: m, ai: p.ai ?? (m === 'ai' ? emptyAiState() : p.ai) }));
+    if (m === 'ai') freeOpenCv();
     setTool(m === 'ai' ? ((project.ai?.exemplars.length ?? 0) > 0 ? 'pan' : 'exemplar') : 'edit');
     setPendingRegion(null);
     setSelectedId(null);
@@ -320,6 +330,7 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
     onError(null);
     setNotice(null);
     setPendingRegion(null);
+    freeOpenCv();
     setProgress({ phase: 'ai-load', fraction: 0 });
     try {
       await aiClient.load();
@@ -333,7 +344,15 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
       const exemplars = ai.exemplars;
       const plan = planTiles(session.canvas.width, session.canvas.height, exemplars);
       const scaled = scaledPixels(session.canvas, plan.width, plan.height);
-      const out = await aiClient.estimate(scaled, plan, (f) => setProgress({ phase: 'ai-run', fraction: f }));
+      const out = await aiClient.estimate(
+        scaled,
+        plan,
+        (f) => setProgress({ phase: 'ai-run', fraction: f }),
+        () => {
+          setNotice(t.ai_fallback_wasm);
+          setProgress({ phase: 'ai-load', fraction: 0 });
+        },
+      );
       commit((p) => ({
         ...p,
         ai: {
@@ -364,7 +383,7 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
     } finally {
       setProgress(null);
     }
-  }, [hist.present.ai, session.canvas, commit, onError, t]);
+  }, [hist.present.ai, session.canvas, commit, onError, freeOpenCv, t]);
 
   const onDrawRect = (kind: 'exemplar' | 'region', x1: number, y1: number, x2: number, y2: number) => {
     const r = normalizeRect(x1, y1, x2, y2, project.image.width, project.image.height);

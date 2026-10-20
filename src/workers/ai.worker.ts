@@ -16,7 +16,10 @@ let sessions: { features: ort.InferenceSession; head: ort.InferenceSession; back
 const post = (msg: AiWorkerResponse, transfer: Transferable[] = []) => self.postMessage(msg, transfer);
 
 async function create(model: ArrayBuffer, ep: 'webgpu' | 'wasm') {
-  return ort.InferenceSession.create(new Uint8Array(model), { executionProviders: [ep], graphOptimizationLevel: 'all' });
+  // No graph optimisation: the int8 weights are not constant-folded into fp32 copies (WASM in
+  // Node: 307 MB RSS after a features run vs 347 MB with 'all', same speed). WebGPU then runs
+  // DequantizeLinear itself; checked to give the same features as WASM (max diff 1.3e-5).
+  return ort.InferenceSession.create(new Uint8Array(model), { executionProviders: [ep], graphOptimizationLevel: 'disabled' });
 }
 
 async function load(urls: { features: string; head: string; wasm: string }, preferGpu: boolean) {

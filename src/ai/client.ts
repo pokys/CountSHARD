@@ -26,6 +26,50 @@ export interface EstimateOutput {
   backend: 'webgpu' | 'wasm';
 }
 
+/**
+ * Crash detection. iOS Safari kills a tab that uses too much memory and reloads the page, so a
+ * failed estimate leaves no error behind. A marker is written before every estimate and removed
+ * afterwards; a marker found at start-up means the previous run killed the page.
+ */
+const RUN_MARKER = 'countshard.ai.running';
+/** Set after a crash on WebGPU: later runs go straight to WASM on this device. */
+const FORCE_WASM = 'countshard.ai.forceWasm';
+
+export interface AiCrashReport {
+  backend: 'webgpu' | 'wasm';
+  at: string;
+}
+
+function storageGet(k: string): string | null {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+}
+function storageSet(k: string, v: string | null) {
+  try {
+    if (v === null) localStorage.removeItem(k);
+    else localStorage.setItem(k, v);
+  } catch {
+    /* storage unavailable: no crash detection */
+  }
+}
+
+/** Reads and clears the crash marker (call once at start-up). */
+export function takeAiCrashReport(): AiCrashReport | null {
+  const raw = storageGet(RUN_MARKER);
+  if (!raw) return null;
+  storageSet(RUN_MARKER, null);
+  try {
+    const r = JSON.parse(raw) as AiCrashReport;
+    if (r.backend === 'webgpu') storageSet(FORCE_WASM, '1');
+    return r;
+  } catch {
+    return null;
+  }
+}
+
 type Pending = { resolve: (v: AiWorkerResponse) => void; reject: (e: Error) => void; onProgress?: (f: number) => void };
 
 class AiClient {
@@ -102,7 +146,7 @@ class AiClient {
   load(): Promise<'webgpu' | 'wasm'> {
     this.loading ??= (async () => {
       const a = Object.fromEntries(aiAssets().map((x) => [x.key, x.url])) as Record<'features' | 'head' | 'wasm', string>;
-      const res = await this.send({ type: 'load', id: ++this.seq, urls: a, preferGpu: true });
+      const res = await this.send({ type: 'load', id: ++this.seq, urls: a, preferGpu: storageGet(FORCE_WASM) !== '1' });
       if (res.type !== 'ready') throw new Error('Unexpected AI worker response');
       this.set({ ready: true, backend: res.backend });
       return res.backend;
@@ -113,11 +157,30 @@ class AiClient {
     return this.loading;
   }
 
-  async estimate(scaled: ImageData, plan: TilePlan, onProgress?: (f: number) => void): Promise<EstimateOutput> {
+  private async estimateOnce(scaled: ImageData, plan: TilePlan, onProgress?: (f: number) => void): Promise<EstimateOutput> {
     const buf = scaled.data.buffer.slice(0) as ArrayBuffer;
-    const res = await this.send({ type: 'estimate', id: ++this.seq, rgba: buf, width: scaled.width, height: scaled.height, plan }, [buf], onProgress);
-    if (res.type !== 'estimate') throw new Error('Unexpected AI worker response');
-    return { grid: new Float32Array(res.grid), gridW: res.gridW, gridH: res.gridH, cell: res.cell, total: res.total, durationMs: res.durationMs, backend: res.backend };
+    storageSet(RUN_MARKER, JSON.stringify({ backend: this.status.backend ?? 'wasm', at: new Date().toISOString() } satisfies AiCrashReport));
+    try {
+      const res = await this.send({ type: 'estimate', id: ++this.seq, rgba: buf, width: scaled.width, height: scaled.height, plan }, [buf], onProgress);
+      if (res.type !== 'estimate') throw new Error('Unexpected AI worker response');
+      return { grid: new Float32Array(res.grid), gridW: res.gridW, gridH: res.gridH, cell: res.cell, total: res.total, durationMs: res.durationMs, backend: res.backend };
+    } finally {
+      storageSet(RUN_MARKER, null);
+    }
+  }
+
+  /** Runs the estimate; a failure on WebGPU is retried once on WASM (and WASM is kept for this device). */
+  async estimate(scaled: ImageData, plan: TilePlan, onProgress?: (f: number) => void, onFallback?: () => void): Promise<EstimateOutput> {
+    try {
+      return await this.estimateOnce(scaled, plan, onProgress);
+    } catch (e) {
+      if (e instanceof CancelledError || this.status.backend !== 'webgpu') throw e;
+      storageSet(FORCE_WASM, '1');
+      this.reset();
+      onFallback?.();
+      await this.load();
+      return this.estimateOnce(scaled, plan, onProgress);
+    }
   }
 
   cancel() {

@@ -310,3 +310,24 @@ describe('Mode B export', () => {
     expect(parseProjectFile(JSON.stringify(file)).summary.mode).toBe('circles');
   });
 });
+
+describe('Mode B crash detection', () => {
+  it('a run marker left behind is reported once, and a WebGPU crash switches the device to WASM', async () => {
+    const store = new Map<string, string>();
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+    const { takeAiCrashReport } = await import('../../src/ai/client');
+    expect(takeAiCrashReport()).toBeNull();
+    store.set('countshard.ai.running', JSON.stringify({ backend: 'wasm', at: 'x' }));
+    expect(takeAiCrashReport()).toEqual({ backend: 'wasm', at: 'x' });
+    expect(store.has('countshard.ai.forceWasm')).toBe(false);
+    expect(takeAiCrashReport()).toBeNull();
+    store.set('countshard.ai.running', JSON.stringify({ backend: 'webgpu', at: 'y' }));
+    expect(takeAiCrashReport()?.backend).toBe('webgpu');
+    expect(store.get('countshard.ai.forceWasm')).toBe('1');
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  });
+});

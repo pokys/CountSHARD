@@ -31,9 +31,10 @@ describe('Mode B model files', () => {
     }
   });
 
-  it('counts a small synthetic rod scene within 10 % (one tile, WASM)', async () => {
+  it('counts a small synthetic rod scene within 10 % and with bounded memory (one tile, WASM)', async () => {
     ort.env.wasm.numThreads = 1;
-    const opts = { executionProviders: ['wasm'] };
+    // Same session options as the app's WASM path (src/workers/ai.worker.ts).
+    const opts = { executionProviders: ['wasm'], graphOptimizationLevel: 'disabled' as const };
     const f = await ort.InferenceSession.create(readFileSync(join(ROOT, 'public', 'models', 'loca', 'loca-features-w8.onnx')), opts);
     const h = await ort.InferenceSession.create(readFileSync(join(ROOT, 'public', 'models', 'loca', 'loca-head-w8.onnx')), opts);
     const backend: LocaBackend = {
@@ -59,7 +60,13 @@ describe('Mode B model files', () => {
     const plan = planTiles(width, height, ex.map((c) => ({ x: c.x - c.r, y: c.y - c.r, w: 2 * c.r, h: 2 * c.r })));
     expect(plan.tiles).toHaveLength(1);
     expect(plan.width).toBe(512); // 40 px exemplars are inside the band: the photo is just fitted into one tile
+    const rss0 = process.memoryUsage().rss;
     const res = await runPlan(backend, resizeRgba({ data: rgba, width, height }, plan.width, plan.height), plan);
+    const grownMb = (process.memoryUsage().rss - rss0) / 1048576;
     expect(Math.abs(res.total - s.truth.length) / s.truth.length).toBeLessThan(0.1);
+    // Memory regression guard: full 64 × 64-token attention needed 8 × 4096² floats (512 MB) per
+    // layer and grew RSS by ≈ 575 MB here; the chunked export stays near 100 MB. WASM memory never
+    // shrinks, so this is what a phone has to hold.
+    expect(grownMb).toBeLessThan(250);
   });
 });

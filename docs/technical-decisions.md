@@ -176,6 +176,15 @@ WASM in one `.wasm`). WebGPU when an adapter exists, otherwise WASM. Multi-threa
 needs cross-origin isolation, which GitHub Pages cannot provide, so WASM runs single-threaded.
 Model files and the 28 MB WASM are **not** precached by the service worker (≈ 63 MB that only
 AI users need): the AI panel downloads them on request with byte progress, verifies size and
-SHA-256, and keeps them in Cache Storage (`countshard-ai-v1`); the worker reads them from
-there, so Mode B works offline after that one download. The status chip lists "AI model
-downloaded" and "AI ready" (sessions created, with the backend) separately.
+SHA-256, and keeps them in Cache Storage (`countshard-ai-v2`; older versions are deleted);
+the worker reads them from there, so Mode B works offline after that one download. The
+status chip lists "AI model downloaded" and "AI ready" (sessions created, with the backend)
+separately.
+
+**Memory (v2, 2026-10-20).** The first release crashed iOS Safari: full self-attention over
+4096 tokens allocates 512 MB per layer, and WASM memory never shrinks. The encoder's attention
+is now exported in 256-query chunks (same weights, same results to 1e-5; ≈ 310 MB instead
+of ≈ 830 MB after a run). Sessions use graph optimisation 'disabled', so int8 weights are not
+expanded to fp32 copies. App guards: a "running" marker in localStorage reveals a run that
+killed the page (message on the next start; after a WebGPU crash the device uses WASM); a WebGPU
+error during a run is retried on WASM; the OpenCV worker is stopped in AI mode.

@@ -243,6 +243,10 @@ export const en: typeof cs = {
   ai_err_run: (msg: string) => `AI estimate failed: ${msg}`,
   ai_err_load: 'The AI model could not be started. Reload the page or delete and re-download the model.',
   ai_qb: 'estimate',
+  ai_crashed: (gpu: boolean) =>
+    `The AI estimate failed – the browser closed the page, most likely because the device ran out of memory. The project is still saved.` +
+    (gpu ? ' Next time the slower but leaner computation (WASM) will be used.' : ' Try closing other tabs and apps, or use a smaller photo.'),
+  ai_fallback_wasm: 'Computing on the graphics card (WebGPU) failed – retrying the slower way (WASM).',
   legend_ai_total: (n: number) => `ESTIMATE ≈ ${n} pcs (AI, density map)`,
   legend_ai_corrected: (raw: number, regions: number) => `model estimate ≈ ${raw} pcs, ${regions} ${regions === 1 ? 'region' : 'regions'} corrected by hand`,
   legend_ai_footer: (date: string) => `Created ${date} with CountSHARD. LOCA model estimate – not individually counted items.`,

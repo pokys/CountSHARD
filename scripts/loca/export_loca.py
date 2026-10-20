@@ -41,6 +41,48 @@ sd = ckpt['model'] if 'model' in ckpt else ckpt
 sd = {k.replace('module.', '', 1): v for k, v in sd.items()}
 model.load_state_dict(sd, strict=True)
 model.eval()
+
+
+class ChunkedSelfAttention(nn.Module):
+    """Same maths as nn.MultiheadAttention (batch_first=False, no masks, eval), but `chunk` queries
+    at a time, so the largest intermediate is heads × chunk × S floats instead of heads × L × S
+    (8 × 4096² × 4 B = 512 MB at 64 × 64 tokens, which phones cannot allocate)."""
+    def __init__(self, mha: nn.MultiheadAttention, chunk: int):
+        super().__init__()
+        self.mha, self.chunk = mha, chunk
+    def forward(self, query, key, value, attn_mask=None, key_padding_mask=None, **kw):
+        assert attn_mask is None and key_padding_mask is None
+        m = self.mha
+        E, H = m.embed_dim, m.num_heads
+        d = E // H
+        W, b = m.in_proj_weight, m.in_proj_bias
+        L, N, _ = query.shape
+        S = key.shape[0]
+        assert N == 1
+        q = F.linear(query, W[:E], b[:E]).reshape(L, H, d).transpose(0, 1) * (d ** -0.5)
+        k = F.linear(key, W[E:2 * E], b[E:2 * E]).reshape(S, H, d).transpose(0, 1)
+        v = F.linear(value, W[2 * E:], b[2 * E:]).reshape(S, H, d).transpose(0, 1)
+        kt = k.transpose(1, 2)  # (H, d, S)
+        parts = [torch.softmax(q[:, s:s + self.chunk] @ kt, dim=-1) @ v for s in range(0, L, self.chunk)]
+        # Pairwise concatenation: onnxruntime-web 1.30's WebGPU Concat returns wrong data with
+        # 8 or more inputs (measured: exact with 4 inputs or a pairwise tree).
+        while len(parts) > 1:
+            parts = [torch.cat(parts[i:i + 2], 1) if i + 1 < len(parts) else parts[i] for i in range(0, len(parts), 2)]
+        o = parts[0].transpose(0, 1).reshape(L, N, E)
+        return F.linear(o, m.out_proj.weight, m.out_proj.bias), None
+
+
+ATTN_CHUNK = int(os.environ.get('ATTN_CHUNK', '0'))
+original_encoder_attn = [layer.self_attn for layer in model.encoder.layers]
+if ATTN_CHUNK:
+    # Only the image encoder attends over all 64 × 64 tokens; the OPE attention in the head is small.
+    with torch.no_grad():
+        x = torch.randn(4096, 1, 256)
+        ref_attn = original_encoder_attn[0](x, x, x)[0]
+        got_attn = ChunkedSelfAttention(original_encoder_attn[0], ATTN_CHUNK)(x, x, x)[0]
+        print(f'chunked attention ({ATTN_CHUNK} queries) vs nn.MultiheadAttention: max abs diff {(ref_attn - got_attn).abs().max().item():.2e}')
+    for layer in model.encoder.layers:
+        layer.self_attn = ChunkedSelfAttention(layer.self_attn, ATTN_CHUNK)
 print('loaded', sum(p.numel() for p in model.parameters()) / 1e6, 'M params')
 
 
@@ -116,6 +158,12 @@ kw = dict(opset_version=17, do_constant_folding=True)
 use_dynamo = os.environ.get('DYNAMO') == '1'
 torch.onnx.export(feat, (x0,), os.path.join(out, 'loca_features_fp32.onnx'), input_names=['image'], output_names=['features'], dynamo=use_dynamo, **kw)
 torch.onnx.export(head, (f0, f0, b0), os.path.join(out, 'loca_head_fp32.onnx'), input_names=['features', 'exemplar_features', 'bboxes'], output_names=['density'], dynamo=use_dynamo, **kw)
+import onnx  # noqa: E402
+for part in ('features', 'head'):
+    g = onnx.load(os.path.join(out, f'loca_{part}_fp32.onnx')).graph
+    widest = max((len(n.input) for n in g.node if n.op_type == 'Concat'), default=0)
+    # onnxruntime-web 1.30 WebGPU: Concat with >= 8 inputs gives wrong results.
+    assert widest < 8, f'{part}: Concat with {widest} inputs'
 print('exported')
 np.savez(os.path.join(out, 'reference.npz'), **{k: v for k, v in ref.items()})
 torch.save([(n, x, b, gt) for n, x, b, gt in samples], os.path.join(out, 'samples.pt'))

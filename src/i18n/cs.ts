@@ -252,6 +252,10 @@ export const cs = {
   ai_err_run: (msg: string) => `AI odhad selhal: ${msg}`,
   ai_err_load: 'AI model se nepodařilo spustit. Zkuste stránku obnovit nebo model smazat a stáhnout znovu.',
   ai_qb: 'odhad',
+  ai_crashed: (gpu: boolean) =>
+    `Odhad AI se nepodařil – prohlížeč stránku ukončil, nejspíš pro nedostatek paměti v zařízení. Projekt zůstal uložený.` +
+    (gpu ? ' Příště se použije pomalejší, ale úspornější výpočet (WASM).' : ' Zkuste zavřít ostatní karty a aplikace, nebo použijte menší fotografii.'),
+  ai_fallback_wasm: 'Výpočet přes grafickou kartu (WebGPU) selhal – zkouším to znovu pomalejším způsobem (WASM).',
   legend_ai_total: (n: number) => `ODHAD ≈ ${n} ks (AI, hustotní mapa)`,
   legend_ai_corrected: (raw: number, regions: number) => `odhad modelu ≈ ${raw} ks, ${regions} ${regions === 1 ? 'oblast opravena' : 'oblasti opraveny'} ručně`,
   legend_ai_footer: (date: string) => `Vytvořeno ${date} v aplikaci CountSHARD. Odhad modelu LOCA – nejde o jednotlivě spočítané kusy.`,

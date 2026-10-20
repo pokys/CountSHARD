@@ -30,7 +30,8 @@ DEBUG_SCENE=clutter DEBUG_PNG=/tmp/clutter.png npx vitest run tests/eval/debug
 | Fused objects in the project: corrections survive a fused merge; uncertain candidates are selectable but count only after confirmation; a removed candidate stays out on re-fusion | `tests/unit/project.test.ts` | unit |
 | Mode B pre/post-processing: tile ownership partitions the image exactly (6 sizes), context margin, aspect ratio kept, exemplar-band scaling, tile limit, exemplar window + padding to 3 boxes, dropped far exemplars; ImageNet normalisation + letterbox, stitching preserves the density sum, resize; thresholded sum | `tests/unit/ai.test.ts` | unit |
 | Mode B estimate correction: area-weighted region sums, corrected = raw − model(region) + user(region), count edit/remove, overlap/too-small/non-integer refused, never negative, ≤ 3 exemplars, stale result after exemplar change; heat-map ramp; CSV/JSON mark the estimate, round-trip, invalid density grid rejected, old projects default to round objects | `tests/unit/ai.test.ts` | unit |
-| Shipped model: file sizes + SHA-256 equal the download manifest; the int8 model runs in onnxruntime-web (WASM, Node) and counts a 480 × 360 synthetic rod scene within 10 % | `tests/unit/aiModel.test.ts` | smoke |
+| Shipped model: file sizes + SHA-256 equal the download manifest; the int8 model runs in onnxruntime-web (WASM, Node, app session options) and counts a 480 × 360 synthetic rod scene within 10 %; one tile grows RSS by < 250 MB (memory regression guard) | `tests/unit/aiModel.test.ts` | smoke |
+| Crash detection: a leftover run marker is reported once; a WebGPU crash switches the device to WASM | `tests/unit/ai.test.ts` | unit |
 
 Synthetic scenes (`tests/synthetic/scene.ts`) are deterministic (seeded) renders of
 pipe/rod end faces with exact ground truth: hex packing or random packing, mixed
@@ -247,9 +248,29 @@ GT = 4 × count; exemplars from the top-left copy.
 - These are 10 synthetic scenes, 20 small dataset photos and 12 mosaics of them, not real
   photos of the target use cases.
 
+### Memory (2026-10-20)
+
+`node scripts/ai-mem-probe.mjs <optimisation level>`: Node RSS after creating both sessions,
+then after one features + head run on a 512 × 512 tile (onnxruntime-web 1.30 WASM, 1 thread).
+
+| features graph | level | after sessions | after run |
+|---|---|---|---|
+| v1 (full attention) | all | 259 MB | 832 MB |
+| v2 (256-query chunks) | all | 248 MB | 346 MB |
+| v2 | basic | 276 MB | 352 MB |
+| v2 (shipped settings) | disabled | 199 MB | 309 MB |
+
+`tests/unit/aiModel.test.ts` fails if a WASM run grows RSS by ≥ 250 MB (v1 grew it by
+1,046 MB with level 'disabled', v2 passes). Phones and WebGPU memory not measured.
+
 ### In the browser (production build, Chromium, Intel Gen12 iGPU, WebGPU)
 
-Demo photo (1400 × 1000, 162 pipes of two sizes) → AI mode → model downloaded (63 MB, three
+v2 model (2026-10-20), same demo photo: WebGPU ≈ 162 in 11.4 s (4 tiles), WASM ≈ 162 in
+27.5 s; a simulated crash marker showed the Czech message after reload and switched the device
+to WASM; the old `countshard-ai-v1` cache was deleted; after an AI run the OpenCV engine showed
+as stopped and a circle re-count afterwards worked.
+
+v1 model: Demo photo (1400 × 1000, 162 pipes of two sizes) → AI mode → model downloaded (63 MB, three
 files, checksums verified, progress shown) → 3 exemplar boxes on small pipes → **≈ 162**
 (true 162), 4 tiles, 16.8 s on the first run (incl. shader compilation), 12.6 s warm
 (≈ 3.1 s per tile). Heat map has one blob on every pipe, small and large. A correction region

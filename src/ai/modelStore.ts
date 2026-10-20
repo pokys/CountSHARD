@@ -5,8 +5,8 @@
  */
 import ortWasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url';
 
-export const AI_CACHE = 'countshard-ai-v1';
-export const AI_MODEL_ID = 'LOCA few-shot (Đukić et al., ICCV 2023), int8 weight-only ONNX export v1';
+export const AI_CACHE = 'countshard-ai-v2';
+export const AI_MODEL_ID = 'LOCA few-shot (Đukić et al., ICCV 2023), int8 weight-only ONNX export v2 (chunked attention)';
 export const ORT_VERSION = '1.30.0';
 
 export interface AiAsset {
@@ -23,8 +23,8 @@ export function aiAssets(base: string = document.baseURI): AiAsset[] {
     {
       key: 'features',
       url: new URL('models/loca/loca-features-w8.onnx', base).href,
-      bytes: 28891798,
-      sha256: '11383053c6d34834ad44a2268b735b43e9d9b32520aada249b6f271261b0d8af',
+      bytes: 28951277,
+      sha256: 'd4b181cf01f5453e6637f2090fdf92cacd5d80d212ed1bcf8be67396be0a7a84',
     },
     {
       key: 'head',
@@ -40,9 +40,15 @@ export function totalBytes(assets = aiAssets()): number {
   return assets.reduce((a, b) => a + b.bytes, 0);
 }
 
+/** Removes caches of earlier model versions (the file URLs stay the same, the content changed). */
+async function dropOldCaches() {
+  for (const k of await caches.keys()) if (k.startsWith('countshard-ai-') && k !== AI_CACHE) await caches.delete(k);
+}
+
 export async function aiDownloaded(assets = aiAssets()): Promise<boolean> {
   if (!('caches' in self)) return false;
   try {
+    await dropOldCaches();
     const cache = await caches.open(AI_CACHE);
     for (const a of assets) if (!(await cache.match(a.url))) return false;
     return true;
