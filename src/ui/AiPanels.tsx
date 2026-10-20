@@ -159,7 +159,7 @@ export function AiPanel({
                   <button className="linklike" onClick={() => onSelectRegion(c.id)}>
                     {t.ai_region(i + 1)}
                   </button>{' '}
-                  · {t.ai_region_model(fmt(summary?.regions[i]?.model ?? 0, 1))} ·{' '}
+                  · {t.ai_region_model(fmt(summary?.regions.find((q) => q.id === c.id)?.model ?? 0, 1))} ·{' '}
                   <input
                     aria-label={t.ai_region_user}
                     inputMode="numeric"

@@ -75,7 +75,7 @@ export function GroupsPanel({ project, stats, commit }: { project: Project; stat
   const { t, fmt } = useI18n();
   const fd = useDiameterFormat();
   const g = project.grouping;
-  const regroup = (grouping = project.grouping) => commit((p) => ({ ...p, grouping, ...applyGrouping(p.objects, p.groups, grouping) }));
+  const regroup = (grouping = project.grouping) => commit((p) => ({ ...p, grouping, ...applyGrouping(p.objects, p.groups, grouping, p.countArea ?? null) }));
   if (stats.total === 0) return null;
   return (
     <Card title={t.groups_title} defaultOpenMobile>
@@ -172,7 +172,7 @@ export function GroupsPanel({ project, stats, commit }: { project: Project; stat
           {t.regroup}
         </button>
         {project.objects.some((o) => o.groupLocked) && (
-          <button className="btn ghost small" onClick={() => commit((p) => ({ ...p, ...applyGrouping(unlockAllGroups(p.objects), p.groups, p.grouping) }))}>
+          <button className="btn ghost small" onClick={() => commit((p) => ({ ...p, ...applyGrouping(unlockAllGroups(p.objects), p.groups, p.grouping, p.countArea ?? null) }))}>
             {t.unlock_groups}
           </button>
         )}
@@ -224,7 +224,7 @@ export function SelectedPanel({ obj, number, project, commit, onRemove }: { obj:
             step={0.5}
             value={obj.r}
             onChange={(e) => commit((p) => ({ ...p, objects: updateObject(p.objects, obj.id, { r: Number(e.target.value) }) }), true)}
-            onPointerUp={() => commit((p) => ({ ...p, ...applyGrouping(p.objects, p.groups, p.grouping) }))}
+            onPointerUp={() => commit((p) => ({ ...p, ...applyGrouping(p.objects, p.groups, p.grouping, p.countArea ?? null) }))}
           />
         </label>
       </div>
@@ -238,7 +238,7 @@ export function SelectedPanel({ obj, number, project, commit, onRemove }: { obj:
             onClick={() =>
               commit((p) => {
                 const objects = setReview(p.objects, [obj.id], 'confirmed');
-                return { ...p, ...applyGrouping(objects, p.groups, p.grouping) };
+                return { ...p, ...applyGrouping(objects, p.groups, p.grouping, p.countArea ?? null) };
               })
             }
           >
@@ -468,7 +468,7 @@ export function useExportPng(project: Project, canvas: HTMLCanvasElement): () =>
     const base = safeFilename(project.name);
     const date = new Date().toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB');
     if (project.mode === 'ai') {
-      const aiSum = project.ai ? summarize(project.ai) : null;
+      const aiSum = project.ai ? summarize(project.ai, project.countArea ?? null) : null;
       if (!aiSum) return;
       const blob = await renderAiPng(canvas, project, {
         title: t.legend_title,
@@ -499,7 +499,7 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
   const base = safeFilename(project.name);
 
   const aiMode = project.mode === 'ai';
-  const aiSum = aiMode && project.ai ? summarize(project.ai) : null;
+  const aiSum = aiMode && project.ai ? summarize(project.ai, project.countArea ?? null) : null;
 
   const png = useExportPng(project, canvas);
   const csv = () => {

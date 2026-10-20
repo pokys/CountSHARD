@@ -27,9 +27,9 @@ export function toCsv(p: Project, o: CsvOptions): string {
   const sep = o.decimal === ',' ? ';' : ',';
   const num = (v: number | null | undefined, digits = 1) => (v === null || v === undefined || Number.isNaN(v) ? '' : v.toFixed(digits).replace('.', o.decimal));
   const groups = new Map(p.groups.map((g) => [g.id, g]));
-  const numbers = numbering(p.objects);
+  const numbers = numbering(p.objects, p.countArea ?? null);
   const rows = p.objects
-    .filter(isCounted)
+    .filter((o) => isCounted(o) && numbers.has(o.id))
     .sort((a, b) => numbers.get(a.id)! - numbers.get(b.id)!)
     .map((obj) => [
       String(numbers.get(obj.id)),
@@ -62,16 +62,17 @@ export interface AiCsvLabels {
  */
 export function toAiCsv(p: Project, o: AiCsvLabels): string {
   const ai = p.ai;
-  const sum = ai ? summarize(ai) : null;
+  const sum = ai ? summarize(ai, p.countArea ?? null) : null;
   const sep = o.decimal === ',' ? ';' : ',';
   const num = (v: number | null | undefined, digits = 1) => (v === null || v === undefined || Number.isNaN(v) ? '' : v.toFixed(digits).replace('.', o.decimal));
   const h = o.headers;
   const rows: string[][] = [[h.type, h.region, h.x, h.y, h.w, h.h, h.model, h.user, h.result]];
   if (ai && sum) {
     rows.push([o.rows.whole, '', '', '', num(p.image.width, 0), num(p.image.height, 0), num(sum.raw), '', String(Math.round(sum.raw))]);
+    // Only corrections that count (inside the counting area, if any); sums looked up by id.
     ai.corrections.forEach((c, i) => {
-      const r = sum.regions[i]!;
-      rows.push([o.rows.regionRow, String(i + 1), num(c.x, 0), num(c.y, 0), num(c.w, 0), num(c.h, 0), num(r.model), String(c.userCount), '']);
+      const r = sum.regions.find((q) => q.id === c.id);
+      if (r) rows.push([o.rows.regionRow, String(i + 1), num(c.x, 0), num(c.y, 0), num(c.w, 0), num(c.h, 0), num(r.model), String(c.userCount), '']);
     });
     rows.push([o.rows.corrected, '', '', '', '', '', '', '', String(Math.round(sum.corrected))]);
     ai.result!.exemplarsUsed.forEach((e, i) => rows.push([o.rows.exemplarRow, String(i + 1), num(e.x, 0), num(e.y, 0), num(e.w, 0), num(e.h, 0), '', '', '']));
@@ -93,7 +94,7 @@ export interface EstimateFileSummary {
 
 export function estimateSummary(p: Project): EstimateFileSummary | null {
   const ai = p.ai;
-  const sum = ai ? summarize(ai) : null;
+  const sum = ai ? summarize(ai, p.countArea ?? null) : null;
   if (!ai || !sum) return null;
   return {
     kind: 'density-estimate',
@@ -101,7 +102,10 @@ export function estimateSummary(p: Project): EstimateFileSummary | null {
     model: ai.result!.model,
     rawEstimate: sum.raw,
     correctedEstimate: sum.corrected,
-    regions: ai.corrections.map((c, i) => ({ x: c.x, y: c.y, w: c.w, h: c.h, modelEstimate: sum.regions[i]!.model, userCount: c.userCount })),
+    regions: ai.corrections.flatMap((c) => {
+      const r = sum.regions.find((q) => q.id === c.id);
+      return r ? [{ x: c.x, y: c.y, w: c.w, h: c.h, modelEstimate: r.model, userCount: c.userCount }] : [];
+    }),
   };
 }
 

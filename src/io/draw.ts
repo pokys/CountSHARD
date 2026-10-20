@@ -180,3 +180,18 @@ export function drawAiOverlay(ctx: CanvasRenderingContext2D, o: AiOverlay, pxPer
     ctx.setLineDash([]);
   }
 }
+
+/** Counting area in exports: dims the outside and outlines the area (context in image units). */
+export function drawCountArea(ctx: CanvasRenderingContext2D, area: { x: number; y: number; w: number; h: number }, imgW: number, imgH: number, pxPerUnit: number) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, imgW, imgH);
+  ctx.rect(area.x, area.y, area.w, area.h);
+  ctx.fillStyle = 'rgba(2, 6, 23, 0.6)';
+  ctx.fill('evenodd');
+  ctx.setLineDash([8 / pxPerUnit, 6 / pxPerUnit]);
+  ctx.lineWidth = 2.5 / pxPerUnit;
+  ctx.strokeStyle = '#facc15';
+  ctx.strokeRect(area.x, area.y, area.w, area.h);
+  ctx.restore();
+}

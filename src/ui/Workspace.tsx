@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
-import { type MultiShotInfo, type Project, isCounted, isSelectable } from '../model/types';
+import { type CountArea, type MultiShotInfo, type Project, inCountArea, isCounted, isSelectable } from '../model/types';
 import { median } from '../analysis/clustering';
 import { CancelledError, analysisClient } from '../analysis/client';
 import { ImageLoadError, analysisPixels, loadImageFile } from '../io/image';
@@ -10,6 +10,7 @@ import {
   addManualObject,
   applyGrouping,
   computeStats,
+  makeCountArea,
   mergeDetections,
   newId,
   numbering,
@@ -17,6 +18,7 @@ import {
   setObjectGroup,
   setReview,
   updateObject,
+  visibleInArea,
 } from '../state/project';
 import type { Session } from './App';
 import { Viewer, type Tool, type ViewerHandle } from './Viewer';
@@ -76,11 +78,11 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const moreRef = useRef<HTMLInputElement>(null);
   const exportPng = useExportPng(hist.present, session.canvas);
   // Short "Added · Undo" notice after a tap edit, so an accidental tap is one tap away from undone.
-  const [toast, setToast] = useState<{ text: string; id: number } | null>(null);
+  const [toast, setToast] = useState<{ text: string; id: number; undoable: boolean } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
-  const showToast = (text: string) => {
+  const showToast = (text: string, undoable = true) => {
     clearTimeout(toastTimer.current);
-    setToast({ text, id: Date.now() });
+    setToast({ text, id: Date.now(), undoable });
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   };
   useEffect(() => () => clearTimeout(toastTimer.current), []);
@@ -130,7 +132,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
       const circles = res.circles.map((c) => ({ x: c.x * toProject, y: c.y * toProject, r: c.r * toProject, score: c.score }));
       commit((p) => {
         const objects = mergeDetections(p.objects, circles);
-        const grouped = applyGrouping(objects, p.groups, p.grouping);
+        const grouped = applyGrouping(objects, p.groups, p.grouping, p.countArea ?? null);
         const diam = circles.map((c) => 2 * c.r).sort((a, b) => a - b);
         return {
           ...p,
@@ -240,7 +242,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
       }));
       commit((p) => {
         const objects = mergeDetections(p.objects, circles);
-        const grouped = applyGrouping(objects, p.groups, p.grouping);
+        const grouped = applyGrouping(objects, p.groups, p.grouping, p.countArea ?? null);
         const diam = circles.filter((c) => c.multiShot.agreement !== 'uncertain').map((c) => 2 * c.r).sort((a, b) => a - b);
         return {
           ...p,
@@ -283,7 +285,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const [pendingRegion, setPendingRegion] = useState<PendingRegion | null>(null);
   const [regionError, setRegionError] = useState<string | null>(null);
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
-  const aiSummary = useMemo(() => (project.ai ? summarize(project.ai) : null), [project.ai]);
+  const aiSummary = useMemo(() => (project.ai ? summarize(project.ai, project.countArea ?? null) : null), [project.ai, project.countArea]);
   const aiResult = project.ai?.result ?? null;
   const heat = useMemo(() => (aiResult ? heatCanvas(aiResult) : null), [aiResult]);
   const [showHeat, setShowHeat] = useState(true);
@@ -385,7 +387,18 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     }
   }, [hist.present.ai, session.canvas, commit, onError, freeOpenCv, t]);
 
-  const onDrawRect = (kind: 'exemplar' | 'region', x1: number, y1: number, x2: number, y2: number) => {
+  /** Sets (or clears) the counting area; size groups are recomputed for the objects inside it. */
+  const setCountArea = (area: CountArea | null) =>
+    commit((p) => ({ ...p, countArea: area, ...applyGrouping(p.objects, p.groups, p.grouping, area) }));
+
+  const onDrawRect = (kind: 'exemplar' | 'region' | 'area', x1: number, y1: number, x2: number, y2: number) => {
+    if (kind === 'area') {
+      const a = makeCountArea(x1, y1, x2, y2, project.image.width, project.image.height);
+      if (!a) return;
+      setCountArea(a);
+      setTool(mode === 'circles' ? 'edit' : 'pan');
+      return;
+    }
     const r = normalizeRect(x1, y1, x2, y2, project.image.width, project.image.height);
     if (r.w < 4 || r.h < 4) return;
     if (kind === 'exemplar') {
@@ -418,7 +431,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
           heatHeight: aiResult ? aiResult.gridH * aiResult.cellPx : 0,
           exemplars: project.ai?.exemplars ?? [],
           regions: [
-            ...(project.ai?.corrections ?? []).map((c, i) => ({ ...c, label: t.ai_region_label(c.userCount, fmt(aiSummary?.regions[i]?.model ?? 0, 1)) })),
+            ...(project.ai?.corrections ?? []).map((c) => ({ ...c, label: t.ai_region_label(c.userCount, fmt(aiSummary?.regions.find((q) => q.id === c.id)?.model ?? 0, 1)) })),
             ...(pendingRegion ? [{ id: 'pending', x: pendingRegion.x, y: pendingRegion.y, w: pendingRegion.w, h: pendingRegion.h, label: '?' }] : []),
           ],
           selectedRegionId,
@@ -426,7 +439,8 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
       : null;
 
   const stats = useMemo(() => computeStats(project), [project]);
-  const numbers = useMemo(() => numbering(project.objects), [project.objects]);
+  const numbers = useMemo(() => numbering(project.objects, project.countArea ?? null), [project.objects, project.countArea]);
+  const shownObjects = useMemo(() => visibleInArea(project).objects, [project]);
   const selected = project.objects.find((o) => o.id === selectedId && isSelectable(o)) ?? null;
 
   const defaultRadius = (x: number, y: number): number => {
@@ -436,10 +450,14 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     return median(near.map((o) => o.r));
   };
 
-  const regroup = (p: Project): Project => ({ ...p, ...applyGrouping(p.objects, p.groups, p.grouping) });
+  const regroup = (p: Project): Project => ({ ...p, ...applyGrouping(p.objects, p.groups, p.grouping, p.countArea ?? null) });
 
   const handlers = {
     onAdd: (x: number, y: number) => {
+      if (!inCountArea(project.countArea, x, y)) {
+        showToast(t.area_outside, false);
+        return;
+      }
       const r = defaultRadius(x, y);
       commit((p) => regroup({ ...p, objects: addManualObject(p.objects, x, y, r, null).objects }));
       showToast(t.toast_added);
@@ -520,6 +538,9 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               <button className={tool === 'select' ? 'on' : ''} onClick={() => setTool('select')} role="radio" aria-checked={tool === 'select'}>
                 {t.tool_select}
               </button>
+              <button className={tool === 'area' ? 'on' : ''} onClick={() => setTool('area')} role="radio" aria-checked={tool === 'area'} data-testid="tool-area">
+                {t.tool_area}
+              </button>
             </div>
           ) : (
             <div className="seg" role="radiogroup">
@@ -538,6 +559,9 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               </button>
               <button className={tool === 'pan' ? 'on' : ''} onClick={() => setTool('pan')} role="radio" aria-checked={tool === 'pan'}>
                 {t.ai_tool_pan}
+              </button>
+              <button className={tool === 'area' ? 'on' : ''} onClick={() => setTool('area')} role="radio" aria-checked={tool === 'area'}>
+                {t.tool_area}
               </button>
             </div>
           )}
@@ -563,6 +587,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
         {toast && (
           <div className="toast" role="status" key={toast.id}>
             <span>{toast.text}</span>
+            {toast.undoable && (
             <button
               className="btn small"
               onClick={() => {
@@ -572,13 +597,15 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             >
               {t.undo}
             </button>
+            )}
           </div>
         )}
         <Viewer
           ref={viewerRef}
           image={session.canvas}
-          objects={project.objects}
+          objects={shownObjects}
           groups={project.groups}
+          area={project.countArea ?? null}
           numbers={showNumbers ? numbers : null}
           selectedId={tool === 'select' ? selectedId : null}
           tool={tool}
@@ -675,6 +702,11 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                 ⬇ PNG
               </button>
             )}
+            {project.countArea && (
+              <button className="btn small" onClick={() => setCountArea(null)} title={t.area_clear_hint} data-testid="area-clear">
+                ✕ {t.area_clear}
+              </button>
+            )}
             {(estimateTooLow(aiSummary) || exemplarsTooDifferent(project.ai?.exemplars ?? [])) && (
               <p className="qb-warn" data-testid="quick-ai-warn">
                 ⚠ {estimateTooLow(aiSummary) ? t.ai_warn_low_short : t.ai_warn_sizes_short(fmt(exemplarSizeRatio(project.ai?.exemplars ?? []), 1))}
@@ -724,6 +756,11 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               ⬇ PNG
             </button>
           )}
+          {project.countArea && (
+            <button className="btn small" onClick={() => setCountArea(null)} title={t.area_clear_hint} data-testid="area-clear">
+              ✕ {t.area_clear}
+            </button>
+          )}
           <input
             ref={moreRef}
             type="file"
@@ -740,7 +777,9 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
         )}
         <div className="toolbar bottom">
           <span className="hint">
-            {tool === 'edit'
+            {tool === 'area'
+              ? t.tool_area_hint
+              : tool === 'edit'
               ? t.tool_edit_hint
               : tool === 'select'
                 ? t.tool_select_hint

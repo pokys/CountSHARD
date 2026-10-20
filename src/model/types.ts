@@ -195,6 +195,11 @@ export interface Project {
   objects: CountedObject[];
   groups: SizeGroup[];
   calibration: Calibration | null;
+  /**
+   * Optional counting area (project-image pixels). Objects whose centre lies outside, and AI
+   * density outside, are ignored. Nothing is deleted: enlarging the area brings them back.
+   */
+  countArea?: CountArea | null;
   analysis: AnalysisInfo | null;
   appVersion: string;
 }
@@ -212,6 +217,18 @@ export const DEFAULT_GROUPING: GroupingParams = { mode: 'auto', k: 2, minSeparat
 /** A fused object the photos disagree about; shown for review, not counted until confirmed. */
 export function isCandidate(o: CountedObject): boolean {
   return o.review === 'unreviewed' && o.multiShot?.agreement === 'uncertain';
+}
+
+export interface CountArea {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** True when the point lies inside the counting area (or there is no area). */
+export function inCountArea(area: CountArea | null | undefined, x: number, y: number): boolean {
+  return !area || (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h);
 }
 
 /** Objects that count towards the total. */

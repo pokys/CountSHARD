@@ -108,14 +108,23 @@ export interface EstimateSummary {
   regions: RegionSummary[];
 }
 
-export function summarize(ai: AiState): EstimateSummary | null {
+export function summarize(ai: AiState, area: Rect | null = null): EstimateSummary | null {
   const res = ai.result;
   if (!res) return null;
   const data = decodeDensity(res.density);
-  const regions = ai.corrections.map((c) => ({ id: c.id, model: sumInRect(res, data, c), user: c.userCount }));
+  // With a counting area only the density inside it counts; corrections whose centre lies
+  // outside are ignored, and inside ones replace the model's sum within the area.
+  const raw = area ? sumInRect(res, data, area) : res.rawTotal;
+  const inside = (c: Rect) => !area || (c.x + c.w / 2 >= area.x && c.x + c.w / 2 <= area.x + area.w && c.y + c.h / 2 >= area.y && c.y + c.h / 2 <= area.y + area.h);
+  const clip = (c: Rect): Rect => {
+    if (!area) return c;
+    const x = Math.max(c.x, area.x), y = Math.max(c.y, area.y);
+    return { x, y, w: Math.max(0, Math.min(c.x + c.w, area.x + area.w) - x), h: Math.max(0, Math.min(c.y + c.h, area.y + area.h) - y) };
+  };
+  const regions = ai.corrections.filter(inside).map((c) => ({ id: c.id, model: sumInRect(res, data, clip(c)), user: c.userCount }));
   const replaced = regions.reduce((a, r) => a + r.model, 0);
   const userCounted = regions.reduce((a, r) => a + r.user, 0);
-  return { raw: res.rawTotal, corrected: Math.max(0, res.rawTotal - replaced + userCounted), userCounted, regions };
+  return { raw, corrected: Math.max(0, raw - replaced + userCounted), userCounted, regions };
 }
 
 /** Display rounding of an estimate (never shown with false precision). */

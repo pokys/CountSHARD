@@ -353,3 +353,24 @@ describe('reliability warnings', () => {
     expect(estimateTooLow(null)).toBe(false);
   });
 });
+
+describe('summarize with a counting area', () => {
+  it('counts only the density inside the area and ignores corrections outside it', () => {
+    // 4×4 grid of 10 px cells, density 1 per cell → total 16.
+    const density = encodeDensity(new Float32Array(16).fill(1));
+    const ai = {
+      exemplars: [],
+      corrections: [
+        { id: 'in', x: 0, y: 0, w: 10, h: 10, userCount: 5, modelAtCreation: 1 },
+        { id: 'out', x: 30, y: 30, w: 10, h: 10, userCount: 9, modelAtCreation: 1 },
+      ],
+      result: { density, gridW: 4, gridH: 4, cellPx: 10, rawTotal: 16 },
+    } as unknown as Parameters<typeof summarize>[0];
+    const all = summarize(ai)!;
+    expect(all.raw).toBeCloseTo(16);
+    const left = summarize(ai, { x: 0, y: 0, w: 20, h: 40 })!; // left half: 8 cells
+    expect(left.raw).toBeCloseTo(8);
+    expect(left.regions.map((r) => r.id)).toEqual(['in']);
+    expect(left.corrected).toBeCloseTo(8 - 1 + 5);
+  });
+});

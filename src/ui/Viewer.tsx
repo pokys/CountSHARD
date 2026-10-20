@@ -4,7 +4,7 @@ import { type AiOverlay, drawAiOverlay, drawAnnotations } from '../io/draw';
 import { hitTest } from '../state/project';
 
 /** Mode A: edit/select. Mode B (AI): draw exemplar boxes, draw correction regions, or just pan. */
-export type Tool = 'edit' | 'select' | 'exemplar' | 'region' | 'pan';
+export type Tool = 'edit' | 'select' | 'exemplar' | 'region' | 'pan' | 'area';
 
 export interface ViewerHandle {
   zoomBy(factor: number): void;
@@ -23,7 +23,9 @@ interface Props {
   /** Mode B overlay. When set, the photo shows the density estimate instead of circles. */
   ai?: AiOverlay | null;
   /** Mode B: a rectangle was drawn with the exemplar or region tool (image coordinates). */
-  onDrawRect?(kind: 'exemplar' | 'region', x1: number, y1: number, x2: number, y2: number): void;
+  onDrawRect?(kind: 'exemplar' | 'region' | 'area', x1: number, y1: number, x2: number, y2: number): void;
+  /** Counting area (both modes): the outside is dimmed. */
+  area?: { x: number; y: number; w: number; h: number } | null;
   onSelectRegion?(id: string | null): void;
   onAdd(x: number, y: number): void;
   onRemove(id: string): void;
@@ -45,7 +47,7 @@ type Gesture =
   | { kind: 'move'; id: string; dx: number; dy: number; moved: boolean }
   | { kind: 'resize'; id: string; moved: boolean }
   | { kind: 'pinch'; d0: number; cx0: number; cy0: number; view: View }
-  | { kind: 'rect'; tool: 'exemplar' | 'region'; x0: number; y0: number; x1: number; y1: number };
+  | { kind: 'rect'; tool: 'exemplar' | 'region' | 'area'; x0: number; y0: number; x1: number; y1: number };
 
 const TAP_SLOP = 7;
 
@@ -79,7 +81,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     // would capture every swipe. Zoomed in: all gestures pan/zoom the photo.
     const zoomed = view.current.s > fitScale.current * 1.02;
     // Drawing a box must not scroll the page either.
-    const drawing = !!p.ai && (p.tool === 'exemplar' || p.tool === 'region');
+    const drawing = p.tool === 'area' || (!!p.ai && (p.tool === 'exemplar' || p.tool === 'region'));
     canvas.style.touchAction = zoomed || drawing ? 'none' : 'pan-y';
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#0b1220';
@@ -92,7 +94,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       if (p.showOverlay) {
         const g = gesture.current;
         const draft =
-          g.kind === 'rect'
+          g.kind === 'rect' && g.tool !== 'area'
             ? { x: Math.min(g.x0, g.x1), y: Math.min(g.y0, g.y1), w: Math.abs(g.x1 - g.x0), h: Math.abs(g.y1 - g.y0), kind: g.tool }
             : null;
         drawAiOverlay(ctx, { ...p.ai, draft }, v.s);
@@ -118,6 +120,24 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
           ctx.stroke();
         }
       }
+    }
+    // Counting area: dim everything outside it; while dragging, show the new rectangle.
+    const g = gesture.current;
+    const draftArea = g.kind === 'rect' && g.tool === 'area' ? { x: Math.min(g.x0, g.x1), y: Math.min(g.y0, g.y1), w: Math.abs(g.x1 - g.x0), h: Math.abs(g.y1 - g.y0) } : null;
+    const a = draftArea ?? p.area;
+    if (a) {
+      const { width: iw, height: ih } = p.image;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(-iw, -ih, iw * 3, ih * 3);
+      ctx.rect(a.x, a.y, a.w, a.h);
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.6)';
+      ctx.fill('evenodd');
+      ctx.setLineDash([8 / v.s, 6 / v.s]);
+      ctx.lineWidth = 2.5 / v.s;
+      ctx.strokeStyle = draftArea ? '#ffffff' : '#facc15';
+      ctx.strokeRect(a.x, a.y, a.w, a.h);
+      ctx.restore();
     }
   }, []);
 
@@ -189,6 +209,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     }
     if (pointers.current.size > 2) return;
     const p = propsRef.current;
+    if (p.tool === 'area') {
+      gesture.current = { kind: 'rect', tool: 'area', x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y };
+      return;
+    }
     if (p.ai) {
       if ((p.tool === 'exemplar' || p.tool === 'region') && p.showOverlay) {
         gesture.current = { kind: 'rect', tool: p.tool, x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y };

@@ -2,10 +2,10 @@
  * Browser exports: annotated PNG, downloads, data URLs.
  */
 import type { AiDensityResult, Project } from '../model/types';
-import { computeStats, numbering } from '../state/project';
+import { computeStats, numbering, visibleInArea } from '../state/project';
 import { decodeDensity, roundEstimate, summarize } from '../ai/estimate';
 import { heatRgba } from '../ai/heatmap';
-import { drawAiOverlay, drawAnnotations } from './draw';
+import { drawAiOverlay, drawAnnotations, drawCountArea } from './draw';
 import { canvasToBlob } from './image';
 
 export interface LegendText {
@@ -28,12 +28,13 @@ export async function renderAnnotatedPng(base: HTMLCanvasElement, p: Project, le
   canvas.height = base.height + legendH;
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(base, 0, 0);
-  drawAnnotations(ctx, p.objects, p.groups, {
+  drawAnnotations(ctx, visibleInArea(p).objects, p.groups, {
     pxPerUnit: 1 / Math.max(1, w / 1600),
-    numbers: numbering(p.objects),
+    numbers: numbering(p.objects, p.countArea ?? null),
     selectedId: null,
     showRejected: false,
   });
+  if (p.countArea) drawCountArea(ctx, p.countArea, base.width, base.height, 1 / Math.max(1, w / 1600));
   // Legend
   ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, base.height, w, legendH);
@@ -91,7 +92,7 @@ export interface AiLegendText {
 export async function renderAiPng(base: HTMLCanvasElement, p: Project, legend: AiLegendText): Promise<Blob> {
   const ai = p.ai!;
   const res = ai.result!;
-  const sum = summarize(ai)!;
+  const sum = summarize(ai, p.countArea ?? null)!;
   const w = base.width;
   const unit = Math.max(1, w / 1200);
   const lineH = 26 * unit;
@@ -131,10 +132,15 @@ export async function renderAiPng(base: HTMLCanvasElement, p: Project, legend: A
       heatWidth: res.gridW * res.cellPx,
       heatHeight: res.gridH * res.cellPx,
       exemplars: res.exemplarsUsed,
-      regions: ai.corrections.map((c, i) => ({ ...c, label: legend.regionLabel(c.userCount, legend.fmt(sum.regions[i]!.model, 1)) })),
+      // Only corrections that count (inside the counting area); sums looked up by id.
+      regions: ai.corrections.flatMap((c) => {
+        const r = sum.regions.find((q) => q.id === c.id);
+        return r ? [{ ...c, label: legend.regionLabel(c.userCount, legend.fmt(r.model, 1)) }] : [];
+      }),
     },
     1 / Math.max(1, w / 1600),
   );
+  if (p.countArea) drawCountArea(ctx, p.countArea, base.width, base.height, 1 / Math.max(1, w / 1600));
   ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, base.height, w, legendH);
   ctx.textBaseline = 'middle';

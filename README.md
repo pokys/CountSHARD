@@ -14,6 +14,8 @@ the browser.*
 - Automatic detection of circular ends in a Web Worker (OpenCV.js), with progress
   and cancel. Works for solid rods and tubes (measures the outer wall, not the bore)
   and for mixed sizes in one photo.
+- Counting area: outline the part of the photo to count (both modes); everything
+  outside is ignored – detections, AI density, exports – without deleting anything.
 - Corrections: tap to add / tap to remove, select to move or resize, undo/redo,
   "hold for original" compare, zoom/pan/pinch. Re-running detection keeps every
   correction (removed false hits stay removed).

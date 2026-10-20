@@ -4,6 +4,8 @@
 import { clusterRadii, median, relativeSpread } from '../analysis/clustering';
 import {
   type Calibration,
+  type CountArea,
+  inCountArea,
   type CountedObject,
   type GroupingParams,
   type Project,
@@ -96,8 +98,17 @@ export function mergeDetections(objects: CountedObject[], detected: DetectedCirc
 }
 
 /** Re-clusters unlocked counted objects; keeps group identities (ids, colours, nominal sizes) stable. */
-export function applyGrouping(objects: CountedObject[], groups: SizeGroup[], grouping: GroupingParams): { objects: CountedObject[]; groups: SizeGroup[] } {
-  const counted = objects.filter(isCounted);
+export function applyGrouping(
+  objects: CountedObject[],
+  groups: SizeGroup[],
+  grouping: GroupingParams,
+  area: CountArea | null = null,
+): { objects: CountedObject[]; groups: SizeGroup[] } {
+  if (area) {
+    // Objects outside the counting area take no part in grouping and hold no group.
+    objects = objects.map((o) => (inCountArea(area, o.x, o.y) || !o.groupId ? o : { ...o, groupId: null, groupLocked: false }));
+  }
+  const counted = objects.filter((o) => isCounted(o) && inCountArea(area, o.x, o.y));
   const free = counted.filter((o) => !o.groupLocked);
   if (counted.length === 0) return { objects, groups: [] };
 
@@ -278,8 +289,8 @@ export interface ProjectStats {
   groups: GroupStats[];
 }
 
-export function computeStats(p: Pick<Project, 'objects' | 'groups' | 'calibration'>): ProjectStats {
-  const counted = p.objects.filter(isCounted);
+export function computeStats(p: Pick<Project, 'objects' | 'groups' | 'calibration'> & { countArea?: CountArea | null }): ProjectStats {
+  const counted = p.objects.filter((o) => isCounted(o) && inCountArea(p.countArea, o.x, o.y));
   const groups = p.groups.map((g) => {
     const radii = counted.filter((o) => o.groupId === g.id).map((o) => o.r);
     const m = median(radii);
@@ -290,12 +301,12 @@ export function computeStats(p: Pick<Project, 'objects' | 'groups' | 'calibratio
       spread: relativeSpread(radii),
       medianDiameterMm: p.calibration ? 2 * m * p.calibration.mmPerPx : null,
     };
-  });
+  }).filter((g) => !p.countArea || g.count > 0);
   return {
     total: counted.length,
     auto: counted.filter((o) => o.source === 'auto').length,
     manual: counted.filter((o) => o.source === 'manual').length,
-    rejected: p.objects.filter((o) => o.review === 'rejected').length,
+    rejected: p.objects.filter((o) => o.review === 'rejected' && inCountArea(p.countArea, o.x, o.y)).length,
     confirmed: counted.filter((o) => o.review === 'confirmed').length,
     unreviewed: counted.filter((o) => o.review === 'unreviewed').length,
     ungrouped: counted.filter((o) => !o.groupId || !p.groups.some((g) => g.id === o.groupId)).length,
@@ -306,11 +317,26 @@ export function computeStats(p: Pick<Project, 'objects' | 'groups' | 'calibratio
 }
 
 /** Objects in reading order (top-to-bottom rows, then left-to-right) for stable numbering. */
-export function numbering(objects: CountedObject[]): Map<string, number> {
-  const counted = objects.filter(isCounted);
+export function numbering(objects: CountedObject[], area: CountArea | null = null): Map<string, number> {
+  const counted = objects.filter((o) => isCounted(o) && inCountArea(area, o.x, o.y));
   const rowH = Math.max(4, median(counted.map((o) => o.r)) * 1.2 || 10);
   const sorted = [...counted].sort((a, b) => Math.floor(a.y / rowH) - Math.floor(b.y / rowH) || a.x - b.x);
   return new Map(sorted.map((o, i) => [o.id, i + 1]));
+}
+
+/** The project as counted: objects outside the counting area removed (for display and export). */
+export function visibleInArea<T extends Pick<Project, 'objects'> & { countArea?: CountArea | null }>(p: T): T {
+  return p.countArea ? { ...p, objects: p.objects.filter((o) => inCountArea(p.countArea, o.x, o.y)) } : p;
+}
+
+/** Normalised rectangle from two corners, clipped to the image; null when (nearly) empty. */
+export function makeCountArea(x1: number, y1: number, x2: number, y2: number, w: number, h: number): CountArea | null {
+  const ax = Math.max(0, Math.min(x1, x2));
+  const ay = Math.max(0, Math.min(y1, y2));
+  const bx = Math.min(w, Math.max(x1, x2));
+  const by = Math.min(h, Math.max(y1, y2));
+  if (bx - ax < 8 || by - ay < 8) return null;
+  return { x: ax, y: ay, w: bx - ax, h: by - ay };
 }
 
 /** Hit test in image coordinates; returns the nearest selectable object containing the point. */

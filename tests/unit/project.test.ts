@@ -11,6 +11,8 @@ import {
   mergeDetections,
   mergeGroups,
   numbering,
+  makeCountArea,
+  visibleInArea,
   projectName,
   hitTest,
   removeGroup,
@@ -155,6 +157,41 @@ describe('group colours', () => {
     const again = applyGrouping(g.objects, legacy, DEFAULT_GROUPING);
     expect(again.groups[0]!.id).toBe(legacy[0]!.id);
     expect(again.groups[0]!.color).not.toBe('#f59e0b');
+  });
+});
+
+describe('counting area', () => {
+  // 20 small objects on the left (x < 600), 10 large ones further right / lower.
+  const scene = () =>
+    applyGrouping(
+      mergeDetections([], [...Array.from({ length: 20 }, (_, i) => circle(i * 30, 0, 10)), ...Array.from({ length: 10 }, (_, i) => circle(i * 50, 100, 20))]),
+      [],
+      DEFAULT_GROUPING,
+    );
+
+  it('counts only objects whose centre is inside the area, without deleting the rest', () => {
+    const g = scene();
+    const area = makeCountArea(-5, -5, 305, 50, 2000, 2000)!; // first 11 small ones (x 0…300)
+    const p = { ...g, calibration: null, countArea: area };
+    expect(computeStats(p).total).toBe(11);
+    expect(computeStats({ ...p, countArea: null }).total).toBe(30);
+    expect(visibleInArea(p).objects).toHaveLength(11);
+    expect(numbering(p.objects, area).size).toBe(11);
+  });
+
+  it('groups only inside the area and drops groups with no members there', () => {
+    const g = scene();
+    const area = makeCountArea(-5, -5, 700, 50, 2000, 2000)!; // only the small ones
+    const regrouped = applyGrouping(g.objects, g.groups, DEFAULT_GROUPING, area);
+    const stats = computeStats({ ...regrouped, calibration: null, countArea: area });
+    expect(stats.groups).toHaveLength(1);
+    expect(stats.groups[0]!.count).toBe(20);
+    expect(regrouped.objects.filter((o) => o.r > 15).every((o) => o.groupId === null)).toBe(true);
+  });
+
+  it('normalises and clips the drawn rectangle, ignoring a near-empty drag', () => {
+    expect(makeCountArea(300, 200, -50, 20, 250, 400)).toEqual({ x: 0, y: 20, w: 250, h: 180 });
+    expect(makeCountArea(10, 10, 14, 200, 500, 500)).toBeNull();
   });
 });
 
