@@ -631,6 +631,24 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
           <button className="qb-total" onClick={() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} aria-label={t.qb_total}>
             <span className="qb-num" data-testid="quick-total">{stats.total}</span> {t.pcs}
           </button>
+          {stats.groups.length > 1 && (
+            // Per-size-group counts in the circle colours, visible without scrolling.
+            <div className="qb-groups" role="list" aria-label={t.groups_title} data-testid="quick-groups">
+              {stats.groups.map((g) => (
+                <span
+                  key={g.group.id}
+                  className="qb-group"
+                  role="listitem"
+                  style={{ ['--gc' as string]: g.group.color }}
+                  title={`${t.group} ${g.group.label} · Ø ${g.medianDiameterMm !== null ? `${fmt(g.medianDiameterMm, 1)} mm` : `${fmt(g.medianDiameterPx, 0)} px`}`}
+                >
+                  <span className="qb-dot" aria-hidden="true" />
+                  {g.group.label}
+                  <strong>{g.count}</strong>
+                </span>
+              ))}
+            </div>
+          )}
           <button
             className="btn small"
             disabled={!!progress || extraPhotos.length >= 4}

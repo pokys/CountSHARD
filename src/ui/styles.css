@@ -650,6 +650,34 @@ input[type='range'] {
   font-size: 0.75rem;
   font-weight: 800;
 }
+.qb-groups {
+  order: 10;
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.qb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 999px;
+  border: 2px solid var(--gc);
+  background: color-mix(in srgb, var(--gc) 18%, #0f172a);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.qb-group strong {
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+}
+.qb-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--gc);
+}
 /* selected object strip over the photo */
 .selbar {
   display: flex;
