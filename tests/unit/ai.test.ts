@@ -374,3 +374,15 @@ describe('summarize with a counting area', () => {
     expect(left.corrected).toBeCloseTo(8 - 1 + 5);
   });
 });
+
+describe('summarize with a lasso area', () => {
+  it('counts density inside the polygon only', () => {
+    // 4×4 grid of 10 px cells, density 1 per cell; triangle = lower-left half of the 40×40 image.
+    const density = encodeDensity(new Float32Array(16).fill(1));
+    const ai = { exemplars: [], corrections: [], result: { density, gridW: 4, gridH: 4, cellPx: 10, rawTotal: 16 } } as unknown as Parameters<typeof summarize>[0];
+    const tri = { x: 0, y: 0, w: 40, h: 40, poly: [[0, 0], [0, 40], [40, 40]] as [number, number][] };
+    const half = summarize(ai, tri)!;
+    expect(half.raw).toBeGreaterThan(7);
+    expect(half.raw).toBeLessThan(9);
+  });
+});

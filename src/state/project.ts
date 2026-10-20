@@ -339,6 +339,38 @@ export function makeCountArea(x1: number, y1: number, x2: number, y2: number, w:
   return { x: ax, y: ay, w: bx - ax, h: by - ay };
 }
 
+/**
+ * Counting area from a drawn stroke (image pixels, clipped to the image). A stroke that encloses
+ * a real shape becomes a lasso polygon; a roughly straight drag becomes the rectangle spanned by
+ * its two ends (the diagonal), so one tool serves both.
+ */
+export function makeCountAreaFromPath(points: [number, number][], w: number, h: number): CountArea | null {
+  if (points.length < 2) return null;
+  const pts = points.map(([x, y]) => [Math.min(w, Math.max(0, x)), Math.min(h, Math.max(0, y))] as [number, number]);
+  const first = pts[0]!;
+  const last = pts[pts.length - 1]!;
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const bx = Math.min(...xs), by = Math.min(...ys);
+  const bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
+  let area2 = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) area2 += (pts[j]![0] + pts[i]![0]) * (pts[j]![1] - pts[i]![1]);
+  const enclosed = Math.abs(area2) / 2;
+  if (pts.length < 8 || enclosed < 0.25 * bw * bh) return makeCountArea(first[0], first[1], last[0], last[1], w, h);
+  if (bw < 8 || bh < 8) return null;
+  return { x: bx, y: by, w: bw, h: bh, poly: simplifyPath(pts, Math.max(bw, bh) / 300) };
+}
+
+/** Drops points closer than `minDist` to the previous kept one (keeps the outline small). */
+function simplifyPath(pts: [number, number][], minDist: number): [number, number][] {
+  const out: [number, number][] = [pts[0]!];
+  for (const p of pts) {
+    const q = out[out.length - 1]!;
+    if (Math.hypot(p[0] - q[0], p[1] - q[1]) >= minDist) out.push([Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]);
+  }
+  return out;
+}
+
 /** Hit test in image coordinates; returns the nearest selectable object containing the point. */
 export function hitTest(objects: CountedObject[], x: number, y: number, slack = 1.05): CountedObject | null {
   let best: CountedObject | null = null;

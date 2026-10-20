@@ -10,7 +10,7 @@ import {
   addManualObject,
   applyGrouping,
   computeStats,
-  makeCountArea,
+  makeCountAreaFromPath,
   mergeDetections,
   newId,
   numbering,
@@ -391,14 +391,14 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const setCountArea = (area: CountArea | null) =>
     commit((p) => ({ ...p, countArea: area, ...applyGrouping(p.objects, p.groups, p.grouping, area) }));
 
+  const onDrawArea = (points: [number, number][]) => {
+    const a = makeCountAreaFromPath(points, project.image.width, project.image.height);
+    if (!a) return;
+    setCountArea(a);
+    setTool(mode === 'circles' ? 'edit' : 'pan');
+  };
+
   const onDrawRect = (kind: 'exemplar' | 'region' | 'area', x1: number, y1: number, x2: number, y2: number) => {
-    if (kind === 'area') {
-      const a = makeCountArea(x1, y1, x2, y2, project.image.width, project.image.height);
-      if (!a) return;
-      setCountArea(a);
-      setTool(mode === 'circles' ? 'edit' : 'pan');
-      return;
-    }
     const r = normalizeRect(x1, y1, x2, y2, project.image.width, project.image.height);
     if (r.w < 4 || r.h < 4) return;
     if (kind === 'exemplar') {
@@ -613,6 +613,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
           showRejected={showRejected}
           ai={aiOverlay}
           onDrawRect={onDrawRect}
+          onDrawArea={onDrawArea}
           onSelectRegion={setSelectedRegionId}
           {...handlers}
         />

@@ -220,15 +220,31 @@ export function isCandidate(o: CountedObject): boolean {
 }
 
 export interface CountArea {
+  /** Bounding box (for a rectangle the area itself). */
   x: number;
   y: number;
   w: number;
   h: number;
+  /** Freehand outline (lasso), closed implicitly. Absent for a rectangle. */
+  poly?: [number, number][];
+}
+
+/** Even–odd point-in-polygon test. */
+export function pointInPolygon(poly: [number, number][], x: number, y: number): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i]!;
+    const [xj, yj] = poly[j]!;
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 /** True when the point lies inside the counting area (or there is no area). */
 export function inCountArea(area: CountArea | null | undefined, x: number, y: number): boolean {
-  return !area || (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h);
+  if (!area) return true;
+  if (x < area.x || x > area.x + area.w || y < area.y || y > area.y + area.h) return false;
+  return !area.poly || pointInPolygon(area.poly, x, y);
 }
 
 /** Objects that count towards the total. */

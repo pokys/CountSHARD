@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import type { CountedObject, SizeGroup } from '../model/types';
-import { type AiOverlay, drawAiOverlay, drawAnnotations } from '../io/draw';
+import { type AiOverlay, drawAiOverlay, drawAnnotations, drawCountArea } from '../io/draw';
 import { hitTest } from '../state/project';
 
 /** Mode A: edit/select. Mode B (AI): draw exemplar boxes, draw correction regions, or just pan. */
@@ -25,7 +25,9 @@ interface Props {
   /** Mode B: a rectangle was drawn with the exemplar or region tool (image coordinates). */
   onDrawRect?(kind: 'exemplar' | 'region' | 'area', x1: number, y1: number, x2: number, y2: number): void;
   /** Counting area (both modes): the outside is dimmed. */
-  area?: { x: number; y: number; w: number; h: number } | null;
+  area?: { x: number; y: number; w: number; h: number; poly?: [number, number][] } | null;
+  /** Area tool: the finger/mouse path, in image coordinates (lasso or diagonal). */
+  onDrawArea?(points: [number, number][]): void;
   onSelectRegion?(id: string | null): void;
   onAdd(x: number, y: number): void;
   onRemove(id: string): void;
@@ -47,7 +49,8 @@ type Gesture =
   | { kind: 'move'; id: string; dx: number; dy: number; moved: boolean }
   | { kind: 'resize'; id: string; moved: boolean }
   | { kind: 'pinch'; d0: number; cx0: number; cy0: number; view: View }
-  | { kind: 'rect'; tool: 'exemplar' | 'region' | 'area'; x0: number; y0: number; x1: number; y1: number };
+  | { kind: 'rect'; tool: 'exemplar' | 'region' | 'area'; x0: number; y0: number; x1: number; y1: number }
+  | { kind: 'lasso'; pts: [number, number][] };
 
 const TAP_SLOP = 7;
 
@@ -121,23 +124,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         }
       }
     }
-    // Counting area: dim everything outside it; while dragging, show the new rectangle.
+    // Counting area: dim everything outside it; while drawing, show the stroke.
     const g = gesture.current;
-    const draftArea = g.kind === 'rect' && g.tool === 'area' ? { x: Math.min(g.x0, g.x1), y: Math.min(g.y0, g.y1), w: Math.abs(g.x1 - g.x0), h: Math.abs(g.y1 - g.y0) } : null;
-    const a = draftArea ?? p.area;
-    if (a) {
-      const { width: iw, height: ih } = p.image;
+    const { width: iw, height: ih } = p.image;
+    const outside = { x: -iw, y: -ih, w: iw * 3, h: ih * 3 };
+    if (g.kind === 'lasso' && g.pts.length > 1) {
       ctx.save();
       ctx.beginPath();
-      ctx.rect(-iw, -ih, iw * 3, ih * 3);
-      ctx.rect(a.x, a.y, a.w, a.h);
-      ctx.fillStyle = 'rgba(2, 6, 23, 0.6)';
-      ctx.fill('evenodd');
+      ctx.moveTo(g.pts[0]![0], g.pts[0]![1]);
+      for (const [x, y] of g.pts.slice(1)) ctx.lineTo(x, y);
       ctx.setLineDash([8 / v.s, 6 / v.s]);
       ctx.lineWidth = 2.5 / v.s;
-      ctx.strokeStyle = draftArea ? '#ffffff' : '#facc15';
-      ctx.strokeRect(a.x, a.y, a.w, a.h);
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
       ctx.restore();
+    } else if (p.area) {
+      drawCountArea(ctx, p.area, iw, ih, v.s, { outside });
     }
   }, []);
 
@@ -199,7 +201,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    canvasRef.current!.setPointerCapture(e.pointerId);
+    try {
+      canvasRef.current!.setPointerCapture(e.pointerId);
+    } catch {
+      /* not capturable (e.g. synthetic or already-released pointer): the gesture still works */
+    }
     const pt = toImage(e.clientX, e.clientY);
     pointers.current.set(e.pointerId, { x: pt.sx, y: pt.sy });
     if (pointers.current.size === 2) {
@@ -210,7 +216,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     if (pointers.current.size > 2) return;
     const p = propsRef.current;
     if (p.tool === 'area') {
-      gesture.current = { kind: 'rect', tool: 'area', x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y };
+      gesture.current = { kind: 'lasso', pts: [[pt.x, pt.y]] };
       return;
     }
     if (p.ai) {
@@ -265,6 +271,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         view.current = { s: g.view.s, tx: g.view.tx + dx, ty: g.view.ty + dy };
         requestDraw();
       }
+    } else if (g.kind === 'lasso') {
+      const last = g.pts[g.pts.length - 1]!;
+      // Keep a point every ~3 screen pixels.
+      if (Math.hypot(pt.x - last[0], pt.y - last[1]) * view.current.s >= 3) {
+        g.pts.push([pt.x, pt.y]);
+        requestDraw();
+      }
     } else if (g.kind === 'rect') {
       g.x1 = pt.x;
       g.y1 = pt.y;
@@ -293,6 +306,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     }
     gesture.current = { kind: 'none' };
     if (e.type === 'pointercancel') return;
+    if (g.kind === 'lasso') {
+      requestDraw();
+      g.pts.push([pt.x, pt.y]);
+      p.onDrawArea?.(g.pts);
+      return;
+    }
     if (g.kind === 'rect') {
       requestDraw();
       if (Math.abs(pt.x - g.x0) * view.current.s > TAP_SLOP && Math.abs(pt.y - g.y0) * view.current.s > TAP_SLOP) p.onDrawRect?.(g.tool, g.x0, g.y0, pt.x, pt.y);

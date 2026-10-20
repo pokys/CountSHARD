@@ -33,7 +33,7 @@ export const cs = {
   qb_more_photo_hint: 'Vyfoťte stejný svazek ze skoro stejného místa – objekty se spojí a každý se započte jen jednou.',
   qb_fuse: (n: number) => `Spojit ${n} snímky`,
   tool_area: 'Oblast',
-  tool_area_hint: 'Tažením ohraničte část snímku, kterou chcete počítat. Vše mimo ni se ignoruje (nic se nemaže).',
+  tool_area_hint: 'Obtáhněte prstem dokola část snímku, kterou chcete počítat (laso), nebo táhněte úhlopříčně pro obdélník. Vše mimo se ignoruje, nic se nemaže.',
   area_clear: 'Oblast',
   area_clear_hint: 'Zrušit oblast počítání – počítat znovu celý snímek.',
   area_outside: 'Mimo oblast počítání – nic nepřidáno.',

@@ -181,17 +181,42 @@ export function drawAiOverlay(ctx: CanvasRenderingContext2D, o: AiOverlay, pxPer
   }
 }
 
-/** Counting area in exports: dims the outside and outlines the area (context in image units). */
-export function drawCountArea(ctx: CanvasRenderingContext2D, area: { x: number; y: number; w: number; h: number }, imgW: number, imgH: number, pxPerUnit: number) {
+type AreaShape = { x: number; y: number; w: number; h: number; poly?: [number, number][] };
+
+function areaPath(ctx: CanvasRenderingContext2D, area: AreaShape) {
+  if (area.poly && area.poly.length > 2) {
+    ctx.moveTo(area.poly[0]![0], area.poly[0]![1]);
+    for (const [x, y] of area.poly.slice(1)) ctx.lineTo(x, y);
+    ctx.closePath();
+  } else {
+    ctx.rect(area.x, area.y, area.w, area.h);
+  }
+}
+
+/**
+ * Counting area (rectangle or lasso): dims everything outside it and outlines it. The context is
+ * in image units; `outside` is the region to dim (the image, or more around it on screen).
+ */
+export function drawCountArea(
+  ctx: CanvasRenderingContext2D,
+  area: AreaShape,
+  imgW: number,
+  imgH: number,
+  pxPerUnit: number,
+  opts: { outside?: { x: number; y: number; w: number; h: number }; color?: string } = {},
+) {
+  const o = opts.outside ?? { x: 0, y: 0, w: imgW, h: imgH };
   ctx.save();
   ctx.beginPath();
-  ctx.rect(0, 0, imgW, imgH);
-  ctx.rect(area.x, area.y, area.w, area.h);
+  ctx.rect(o.x, o.y, o.w, o.h);
+  areaPath(ctx, area);
   ctx.fillStyle = 'rgba(2, 6, 23, 0.6)';
   ctx.fill('evenodd');
+  ctx.beginPath();
+  areaPath(ctx, area);
   ctx.setLineDash([8 / pxPerUnit, 6 / pxPerUnit]);
   ctx.lineWidth = 2.5 / pxPerUnit;
-  ctx.strokeStyle = '#facc15';
-  ctx.strokeRect(area.x, area.y, area.w, area.h);
+  ctx.strokeStyle = opts.color ?? '#facc15';
+  ctx.stroke();
   ctx.restore();
 }

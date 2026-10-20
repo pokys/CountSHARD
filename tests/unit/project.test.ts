@@ -12,6 +12,7 @@ import {
   mergeGroups,
   numbering,
   makeCountArea,
+  makeCountAreaFromPath,
   visibleInArea,
   projectName,
   hitTest,
@@ -187,6 +188,26 @@ describe('counting area', () => {
     expect(stats.groups).toHaveLength(1);
     expect(stats.groups[0]!.count).toBe(20);
     expect(regrouped.objects.filter((o) => o.r > 15).every((o) => o.groupId === null)).toBe(true);
+  });
+
+  it('turns a stroke around the objects into a lasso and a straight drag into a rectangle', () => {
+    // Circle-ish stroke (radius 100 around 200,200).
+    const ring = Array.from({ length: 40 }, (_, i) => [200 + 100 * Math.cos((i / 40) * 2 * Math.PI), 200 + 100 * Math.sin((i / 40) * 2 * Math.PI)] as [number, number]);
+    const lasso = makeCountAreaFromPath(ring, 1000, 1000)!;
+    expect(lasso.poly!.length).toBeGreaterThan(10);
+    expect(Math.round(lasso.w)).toBe(200);
+    // Diagonal drag with a little wobble → rectangle between the ends.
+    const diag = Array.from({ length: 30 }, (_, i) => [10 + i * 10, 20 + i * 8 + (i % 2)] as [number, number]);
+    const rect = makeCountAreaFromPath(diag, 1000, 1000)!;
+    expect(rect.poly).toBeUndefined();
+    expect(rect).toEqual({ x: 10, y: 20, w: 290, h: 233 }); // last point: y = 20 + 29·8 + 1
+  });
+
+  it('counts objects inside the lasso, not just inside its bounding box', () => {
+    // Triangle covering the lower-left half of a 0..400 square.
+    const area = { x: 0, y: 0, w: 400, h: 400, poly: [[0, 0], [0, 400], [400, 400]] as [number, number][] };
+    const objs = mergeDetections([], [circle(50, 300), circle(100, 350), circle(300, 50), circle(350, 100)]);
+    expect(computeStats({ objects: objs, groups: [], calibration: null, countArea: area }).total).toBe(2);
   });
 
   it('normalises and clips the drawn rectangle, ignoring a near-empty drag', () => {

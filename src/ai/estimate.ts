@@ -5,7 +5,7 @@
  * can correct it region by region: inside a corrected region the user's count replaces the
  * model's density sum. Regions may not overlap, so every pixel is counted by exactly one source.
  */
-import type { AiBox, AiDensityResult, AiRegionCorrection, AiState } from '../model/types';
+import { type AiBox, type AiDensityResult, type AiRegionCorrection, type AiState, type CountArea, inCountArea, pointInPolygon } from '../model/types';
 
 export const MAX_EXEMPLARS = 3;
 
@@ -77,6 +77,34 @@ export function sumInRect(res: Pick<AiDensityResult, 'cellPx' | 'gridW' | 'gridH
   return s;
 }
 
+/**
+ * Density summed over a lasso polygon (optionally also limited to `clip`). Each cell is weighted
+ * by the share of a 4 × 4 grid of sample points inside the polygon.
+ */
+export function sumInPolygon(res: Pick<AiDensityResult, 'cellPx' | 'gridW' | 'gridH'>, data: ArrayLike<number>, poly: [number, number][], box: Rect, clip?: Rect): number {
+  const r = clip ? { x: Math.max(box.x, clip.x), y: Math.max(box.y, clip.y), w: 0, h: 0 } : { ...box };
+  if (clip) {
+    r.w = Math.min(box.x + box.w, clip.x + clip.w) - r.x;
+    r.h = Math.min(box.y + box.h, clip.y + clip.h) - r.y;
+    if (r.w <= 0 || r.h <= 0) return 0;
+  }
+  const c = res.cellPx;
+  const S = 4;
+  let s = 0;
+  for (let cy = Math.max(0, Math.floor(r.y / c)); cy < Math.min(res.gridH, Math.ceil((r.y + r.h) / c)); cy++)
+    for (let cx = Math.max(0, Math.floor(r.x / c)); cx < Math.min(res.gridW, Math.ceil((r.x + r.w) / c)); cx++) {
+      let n = 0;
+      for (let j = 0; j < S; j++)
+        for (let i = 0; i < S; i++) {
+          const px = (cx + (i + 0.5) / S) * c;
+          const py = (cy + (j + 0.5) / S) * c;
+          if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h && pointInPolygon(poly, px, py)) n++;
+        }
+      if (n) s += (data[cy * res.gridW + cx]! * n) / (S * S);
+    }
+  return s;
+}
+
 // --- corrections -----------------------------------------------------------
 
 export type CorrectionError = 'overlap' | 'too-small' | 'bad-count';
@@ -108,20 +136,21 @@ export interface EstimateSummary {
   regions: RegionSummary[];
 }
 
-export function summarize(ai: AiState, area: Rect | null = null): EstimateSummary | null {
+export function summarize(ai: AiState, area: CountArea | null = null): EstimateSummary | null {
   const res = ai.result;
   if (!res) return null;
   const data = decodeDensity(res.density);
   // With a counting area only the density inside it counts; corrections whose centre lies
   // outside are ignored, and inside ones replace the model's sum within the area.
-  const raw = area ? sumInRect(res, data, area) : res.rawTotal;
-  const inside = (c: Rect) => !area || (c.x + c.w / 2 >= area.x && c.x + c.w / 2 <= area.x + area.w && c.y + c.h / 2 >= area.y && c.y + c.h / 2 <= area.y + area.h);
-  const clip = (c: Rect): Rect => {
-    if (!area) return c;
+  const raw = !area ? res.rawTotal : area.poly ? sumInPolygon(res, data, area.poly, area) : sumInRect(res, data, area);
+  const inside = (c: Rect) => inCountArea(area, c.x + c.w / 2, c.y + c.h / 2);
+  const modelIn = (c: Rect): number => {
+    if (!area) return sumInRect(res, data, c);
+    if (area.poly) return sumInPolygon(res, data, area.poly, area, c);
     const x = Math.max(c.x, area.x), y = Math.max(c.y, area.y);
-    return { x, y, w: Math.max(0, Math.min(c.x + c.w, area.x + area.w) - x), h: Math.max(0, Math.min(c.y + c.h, area.y + area.h) - y) };
+    return sumInRect(res, data, { x, y, w: Math.max(0, Math.min(c.x + c.w, area.x + area.w) - x), h: Math.max(0, Math.min(c.y + c.h, area.y + area.h) - y) });
   };
-  const regions = ai.corrections.filter(inside).map((c) => ({ id: c.id, model: sumInRect(res, data, clip(c)), user: c.userCount }));
+  const regions = ai.corrections.filter(inside).map((c) => ({ id: c.id, model: modelIn(c), user: c.userCount }));
   const replaced = regions.reduce((a, r) => a + r.model, 0);
   const userCounted = regions.reduce((a, r) => a + r.user, 0);
   return { raw, corrected: Math.max(0, raw - replaced + userCounted), userCounted, regions };
