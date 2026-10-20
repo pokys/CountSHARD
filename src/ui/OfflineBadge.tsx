@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
 import { checkOffline, isFullyOffline, type OfflineStatus } from '../pwa/offline';
 import { registerServiceWorker } from '../pwa/register';
+import { iosBrowserTab, refreshApp, wipeEverything } from '../pwa/maintenance';
 import { type AiStatus, aiClient } from '../ai/client';
 
 export function OfflineBadge({ engineLoaded }: { engineLoaded: boolean }) {
@@ -74,6 +75,20 @@ export function OfflineBadge({ engineLoaded }: { engineLoaded: boolean }) {
             </p>
           )}
           <p className="muted small">{t.offline_note}</p>
+          {!status.persisted && iosBrowserTab() && <p className="small warn">{t.maint_ios_home}</p>}
+          <details className="maint">
+            <summary className="small">{t.maint_title}</summary>
+            <p className="muted tiny">{t.maint_note}</p>
+            <div className="row wrap">
+              <button className="btn small" onClick={() => void refreshApp()} title={t.maint_refresh_hint}>
+                {t.maint_refresh}
+              </button>
+              <button className="btn small danger" onClick={() => confirm(t.maint_wipe_confirm) && void wipeEverything()}>
+                {t.maint_wipe}
+              </button>
+            </div>
+            <p className="muted tiny">{t.maint_refresh_hint}</p>
+          </details>
         </div>
       )}
     </div>

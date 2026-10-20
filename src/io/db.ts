@@ -48,6 +48,28 @@ function tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransactio
   );
 }
 
+/** Closes the connection so the database can be deleted. */
+export async function closeDb(): Promise<void> {
+  if (!dbPromise) return;
+  try {
+    (await dbPromise).close();
+  } catch {
+    /* never opened */
+  }
+  dbPromise = null;
+}
+
+export async function deleteAllData(): Promise<void> {
+  await closeDb();
+  // Also the database of the app's earlier name, which may still exist on early users' devices.
+  for (const name of [DB_NAME, 'countit']) {
+    await new Promise<void>((resolve) => {
+      const req = indexedDB.deleteDatabase(name);
+      req.onsuccess = req.onerror = req.onblocked = () => resolve();
+    });
+  }
+}
+
 export async function saveProject(p: Project, image?: Blob): Promise<void> {
   await tx(['projects', 'images'], 'readwrite', (t) => {
     t.objectStore('projects').put(p);

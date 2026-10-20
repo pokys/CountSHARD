@@ -212,6 +212,15 @@ select {
   margin: 0 0 8px;
   font-size: 1rem;
 }
+.popover .maint {
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+.popover .maint summary {
+  cursor: pointer;
+  color: var(--muted);
+}
 .checklist {
   list-style: none;
   margin: 0 0 8px;
