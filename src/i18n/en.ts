@@ -25,6 +25,8 @@ export const en: typeof cs = {
   qb_more_photo: 'Another photo',
   qb_more_photo_hint: 'Photograph the same bundle from nearly the same spot – objects are merged and each counts once.',
   qb_fuse: (n: number) => `Merge ${n} photos`,
+  toast_added: 'Added 1 object',
+  toast_removed: 'Removed 1 object',
   qb_total: 'Total',
   sel_title: (n: number, d: string) => `${n} · Ø ${d}`,
   sel_close: 'Close',

@@ -678,6 +678,64 @@ input[type='range'] {
   border-radius: 50%;
   background: var(--gc);
 }
+/* "Added · Undo" notice over the photo */
+.toast {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 6px 6px 14px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.94);
+  color: #f8fafc;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-size: 0.9rem;
+  white-space: nowrap;
+  animation: toast-in 0.15s ease-out;
+}
+.toast .btn {
+  min-height: 32px;
+  background: #22c55e;
+  border-color: #22c55e;
+  color: #052e16;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+/* collapsible panels */
+details.card > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+}
+details.card > summary::-webkit-details-marker {
+  display: none;
+}
+details.card > summary h2 {
+  margin: 0;
+}
+details.card > summary::after {
+  content: '▾';
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+details.card:not([open]) > summary::after {
+  transform: rotate(-90deg);
+}
+details.card[open] > .card-body {
+  margin-top: 10px;
+}
 /* selected object strip over the photo */
 .selbar {
   display: flex;

@@ -20,7 +20,7 @@ import {
 } from '../state/project';
 import type { Session } from './App';
 import { Viewer, type Tool, type ViewerHandle } from './Viewer';
-import { CalibrationPanel, ExportPanel, type ExtraPhoto, GroupsPanel, MultiShotPanel, ResultPanel, SelectedPanel, SettingsPanel } from './Panels';
+import { CalibrationPanel, ExportPanel, type ExtraPhoto, GroupsPanel, MultiShotPanel, ResultPanel, SelectedPanel, SettingsPanel, useExportPng } from './Panels';
 import { AiPanel, AiResultPanel, type PendingRegion } from './AiPanels';
 import { type AiStatus, aiClient } from '../ai/client';
 import { AI_MODEL_ID, AiDownloadError, ORT_VERSION, deleteAi } from '../ai/modelStore';
@@ -72,6 +72,16 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
   const [fusionReport, setFusionReport] = useState<MultiShotInfo | null>(() => session.project.analysis?.multiShot ?? null);
   const viewerRef = useRef<ViewerHandle>(null);
   const moreRef = useRef<HTMLInputElement>(null);
+  const exportPng = useExportPng(hist.present, session.canvas);
+  // Short "Added · Undo" notice after a tap edit, so an accidental tap is one tap away from undone.
+  const [toast, setToast] = useState<{ text: string; id: number } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+  const showToast = (text: string) => {
+    clearTimeout(toastTimer.current);
+    setToast({ text, id: Date.now() });
+    toastTimer.current = setTimeout(() => setToast(null), 3500);
+  };
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
   const resultRef = useRef<HTMLDivElement>(null);
 
   const commit: Commit = useCallback((fn, coalesce = false) => {
@@ -413,10 +423,12 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
     onAdd: (x: number, y: number) => {
       const r = defaultRadius(x, y);
       commit((p) => regroup({ ...p, objects: addManualObject(p.objects, x, y, r, null).objects }));
+      showToast(t.toast_added);
     },
     onRemove: (id: string) => {
       commit((p) => ({ ...p, objects: removeObject(p.objects, id) }));
       if (id === selectedId) setSelectedId(null);
+      showToast(t.toast_removed);
     },
     onSelect: setSelectedId,
     onMove: (id: string, x: number, y: number, final: boolean) => commit((p) => ({ ...p, objects: updateObject(p.objects, id, { x, y }) }), !final),
@@ -529,6 +541,20 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
           </div>
         </div>
         <div className="viewer-wrap">
+        {toast && (
+          <div className="toast" role="status" key={toast.id}>
+            <span>{toast.text}</span>
+            <button
+              className="btn small"
+              onClick={() => {
+                setHist(undo);
+                setToast(null);
+              }}
+            >
+              {t.undo}
+            </button>
+          </div>
+        )}
         <Viewer
           ref={viewerRef}
           image={session.canvas}
@@ -625,6 +651,11 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
             <button className="btn small primary" disabled={!!progress || !aiStatus.downloaded || !(project.ai?.exemplars.length)} onClick={runAi} data-testid="quick-ai-run">
               {aiResult ? t.ai_rerun : t.ai_run}
             </button>
+            {aiResult && (
+              <button className="btn small" onClick={() => void exportPng()} title={t.export_png}>
+                ⬇ PNG
+              </button>
+            )}
           </div>
         ) : (
         <div className="quickbar">
@@ -662,6 +693,11 @@ export function Workspace({ session, onEngineLoaded, onError, onNewPhoto }: Prop
           {extraPhotos.length > 0 && (
             <button className="btn small primary" disabled={!!progress} onClick={runFusion} data-testid="quick-fuse">
               {t.qb_fuse(extraPhotos.length + 1)}
+            </button>
+          )}
+          {stats.total > 0 && (
+            <button className="btn small" onClick={() => void exportPng()} title={t.export_png} data-testid="quick-png">
+              ⬇ PNG
             </button>
           )}
           <input

@@ -25,6 +25,8 @@ export const cs = {
   qb_more_photo: 'Další snímek',
   qb_more_photo_hint: 'Vyfoťte stejný svazek ze skoro stejného místa – objekty se spojí a každý se započte jen jednou.',
   qb_fuse: (n: number) => `Spojit ${n} snímky`,
+  toast_added: 'Přidán 1 objekt',
+  toast_removed: 'Odebrán 1 objekt',
   qb_total: 'Celkem',
   sel_title: (n: number, d: string) => `${n} · Ø ${d}`,
   sel_close: 'Zavřít',

@@ -21,6 +21,22 @@ import { toAiCsv, toCsv, toProjectFile } from '../io/serialize';
 import { roundEstimate, summarize } from '../ai/estimate';
 import type { Commit } from './Workspace';
 
+/**
+ * Collapsible panel. Open on desktop; on phones only the essential ones start open so the
+ * photo, result and actions are not buried under settings.
+ */
+export function Card({ title, children, defaultOpenMobile = false }: { title: string; children: React.ReactNode; defaultOpenMobile?: boolean }) {
+  const mobile = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 860px)').matches;
+  return (
+    <details className="card collapsible" open={!mobile || defaultOpenMobile}>
+      <summary>
+        <h2>{title}</h2>
+      </summary>
+      <div className="card-body">{children}</div>
+    </details>
+  );
+}
+
 /** Spread above which a size group is flagged for review (MAD/median). */
 const SPREAD_WARN = 0.08;
 
@@ -62,8 +78,7 @@ export function GroupsPanel({ project, stats, commit }: { project: Project; stat
   const regroup = (grouping = project.grouping) => commit((p) => ({ ...p, grouping, ...applyGrouping(p.objects, p.groups, grouping) }));
   if (stats.total === 0) return null;
   return (
-    <section className="card">
-      <h2>{t.groups_title}</h2>
+    <Card title={t.groups_title} defaultOpenMobile>
       <table className="groups">
         <thead>
           <tr>
@@ -162,7 +177,7 @@ export function GroupsPanel({ project, stats, commit }: { project: Project; stat
           </button>
         )}
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -252,8 +267,7 @@ export function CalibrationPanel({ project, commit }: { project: Project; commit
   const cal = project.calibration;
   if (!project.objects.some(isCounted)) return null;
   return (
-    <section className="card">
-      <h2>{t.calib_title}</h2>
+    <Card title={t.calib_title}>
       {cal ? (
         <>
           <p className="small">{t.calib_active(fmt(cal.mmPerPx, 4), cal.referenceObjectId ? t.calib_ref_object : t.calib_ref_group)}</p>
@@ -291,7 +305,7 @@ export function CalibrationPanel({ project, commit }: { project: Project; commit
           </div>
         </>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -301,8 +315,7 @@ export function SettingsPanel({ project, commit, running, onRun }: { project: Pr
   const set = (patch: Partial<Project['params']>) => commit((pr) => ({ ...pr, params: { ...pr.params, ...patch } }));
   const est = project.analysis?.estimatedDiameterPx;
   return (
-    <section className="card">
-      <h2>{t.settings_title}</h2>
+    <Card title={t.settings_title}>
       <label className="stack">
         <span>
           {t.sensitivity}: {p.sensitivity}
@@ -349,7 +362,7 @@ export function SettingsPanel({ project, commit, running, onRun }: { project: Pr
       </button>
       <p className="muted tiny">{t.rerun_hint}</p>
       {project.analysis && <p className="muted tiny">{t.analysis_info(project.analysis.durationMs, project.analysis.analysisWidth, project.analysis.analysisHeight)}</p>}
-    </section>
+    </Card>
   );
 }
 
@@ -378,8 +391,7 @@ export function MultiShotPanel({
   const refused = report ? report.photos.filter((p) => p.status !== 'reference' && p.status !== 'used').length : 0;
   const noGain = report?.status === 'fused' && report.addedCount === 0 && report.droppedFromReference === 0 && report.uncertainCount === 0;
   return (
-    <section className="card">
-      <h2>{t.ms_title}</h2>
+    <Card title={t.ms_title} defaultOpenMobile={!!report}>
       <p className="muted tiny">{t.ms_hint}</p>
       <ol className="ms-list small">
         <li>{t.ms_photo(0)}</li>
@@ -444,23 +456,19 @@ export function MultiShotPanel({
           </ol>
         </div>
       )}
-    </section>
+    </Card>
   );
 }
 
-export function ExportPanel({ project, canvas, commit }: { project: Project; canvas: HTMLCanvasElement; commit: Commit }) {
+/** Annotated PNG download (circles: numbered marks + legend; AI: heat map + estimate). */
+export function useExportPng(project: Project, canvas: HTMLCanvasElement): () => Promise<void> {
   const { t, lang, fmt } = useI18n();
   const fd = useDiameterFormat();
-  const [name, setName] = useState(project.name);
-  useEffect(() => setName(project.name), [project.name]);
-  const base = safeFilename(project.name);
-  const date = new Date().toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB');
-
-  const aiMode = project.mode === 'ai';
-  const aiSum = aiMode && project.ai ? summarize(project.ai) : null;
-
-  const png = async () => {
-    if (aiMode) {
+  return async () => {
+    const base = safeFilename(project.name);
+    const date = new Date().toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB');
+    if (project.mode === 'ai') {
+      const aiSum = project.ai ? summarize(project.ai) : null;
       if (!aiSum) return;
       const blob = await renderAiPng(canvas, project, {
         title: t.legend_title,
@@ -482,6 +490,18 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
     );
     downloadBlob(blob, `${base}-${project.objects.filter(isCounted).length}.png`);
   };
+}
+
+export function ExportPanel({ project, canvas, commit }: { project: Project; canvas: HTMLCanvasElement; commit: Commit }) {
+  const { t, lang } = useI18n();
+  const [name, setName] = useState(project.name);
+  useEffect(() => setName(project.name), [project.name]);
+  const base = safeFilename(project.name);
+
+  const aiMode = project.mode === 'ai';
+  const aiSum = aiMode && project.ai ? summarize(project.ai) : null;
+
+  const png = useExportPng(project, canvas);
   const csv = () => {
     if (aiMode) {
       const text = toAiCsv(project, {
@@ -507,8 +527,7 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
   };
 
   return (
-    <section className="card">
-      <h2>{t.export_title}</h2>
+    <Card title={t.export_title}>
       <label className="stack">
         <span>{t.project_name}</span>
         <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== project.name && commit((p) => ({ ...p, name: name.trim() }))} />
@@ -525,6 +544,6 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
         </button>
       </div>
       <p className="muted tiny">{t.saved_locally}</p>
-    </section>
+    </Card>
   );
 }

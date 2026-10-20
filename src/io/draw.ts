@@ -23,6 +23,12 @@ export interface DrawOptions {
 export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedObject[], groups: SizeGroup[], o: DrawOptions) {
   const colors = new Map(groups.map((g) => [g.id, g.color]));
   const u = 1 / o.pxPerUnit;
+  // Numbers are shown for all objects or for none: one on-screen font size from the
+  // typical object size, so small and large objects are labelled consistently.
+  const radii = objects.filter(isCounted).map((x) => x.r).sort((a, b) => a - b);
+  const typicalR = radii.length ? radii[Math.floor(radii.length / 2)]! : 0;
+  const numberPx = Math.min(16, typicalR * o.pxPerUnit * 0.8);
+  const showNumbers = !!o.numbers && numberPx >= 7;
   for (const obj of objects) {
     const counted = isCounted(obj);
     const candidate = isCandidate(obj);
@@ -74,9 +80,9 @@ export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedO
       ctx.strokeStyle = '#ffffff';
       ctx.stroke();
     }
-    const n = o.numbers?.get(obj.id);
-    const fontPx = Math.min(obj.r * 0.9, Math.max(obj.r * 0.55, 11 * u));
-    if (n !== undefined && fontPx * o.pxPerUnit >= 7) {
+    const n = showNumbers ? o.numbers!.get(obj.id) : undefined;
+    const fontPx = numberPx * u;
+    if (n !== undefined) {
       ctx.font = `700 ${fontPx}px system-ui, -apple-system, Segoe UI, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
