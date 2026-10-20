@@ -26,7 +26,7 @@ import { type AiStatus, aiClient } from '../ai/client';
 import { AI_MODEL_ID, AiDownloadError, ORT_VERSION, deleteAi } from '../ai/modelStore';
 import { planTiles } from '../ai/tiling';
 import { GRID_CELL } from '../ai/runner';
-import { addCorrection, addExemplar, decodeDensity, emptyAiState, encodeDensity, normalizeRect, roundEstimate, sumInRect, summarize } from '../ai/estimate';
+import { addCorrection, addExemplar, decodeDensity, emptyAiState, encodeDensity, normalizeRect, roundEstimate, sumInRect, summarize, estimateTooLow, exemplarSizeRatio, exemplarsTooDifferent } from '../ai/estimate';
 import { heatCanvas } from '../io/export';
 import type { AiOverlay } from '../io/draw';
 
@@ -674,6 +674,11 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               <button className="btn small" onClick={() => void exportPng()} title={t.export_png}>
                 ⬇ PNG
               </button>
+            )}
+            {(estimateTooLow(aiSummary) || exemplarsTooDifferent(project.ai?.exemplars ?? [])) && (
+              <p className="qb-warn" data-testid="quick-ai-warn">
+                ⚠ {estimateTooLow(aiSummary) ? t.ai_warn_low_short : t.ai_warn_sizes_short(fmt(exemplarSizeRatio(project.ai?.exemplars ?? []), 1))}
+              </p>
             )}
           </div>
         ) : (

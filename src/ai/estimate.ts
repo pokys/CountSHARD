@@ -159,3 +159,30 @@ export function resultIsStale(ai: AiState): boolean {
   if (now !== [...res.inputExemplarIds].sort().join(',')) return true;
   return !res.exemplarsUsed.every((u) => ai.exemplars.some((e) => e.id === u.id && e.x === u.x && e.y === u.y && e.w === u.w && e.h === u.h));
 }
+
+// --- reliability warnings ----------------------------------------------------
+
+/** Exemplars whose sizes differ more than this (ratio of sqrt(w·h)) confuse the model. */
+export const EXEMPLAR_SIZE_RATIO_WARN = 1.8;
+/**
+ * Below this estimate the model is unreliable: LOCA was trained on images with dozens to
+ * hundreds of small, similar objects; a few large objects (e.g. 8 profiles in perspective)
+ * make it spread density over sides and background.
+ */
+export const LOW_COUNT_WARN = 15;
+
+/** Ratio of the largest to the smallest exemplar size (1 when fewer than two exemplars). */
+export function exemplarSizeRatio(exemplars: Pick<AiBox, 'w' | 'h'>[]): number {
+  if (exemplars.length < 2) return 1;
+  const sizes = exemplars.map((e) => Math.sqrt(Math.max(1, e.w) * Math.max(1, e.h)));
+  return Math.max(...sizes) / Math.min(...sizes);
+}
+
+export function exemplarsTooDifferent(exemplars: Pick<AiBox, 'w' | 'h'>[]): boolean {
+  return exemplarSizeRatio(exemplars) > EXEMPLAR_SIZE_RATIO_WARN;
+}
+
+/** True when the shown estimate is small enough that manual counting is the better choice. */
+export function estimateTooLow(summary: Pick<EstimateSummary, 'corrected'> | null): boolean {
+  return !!summary && summary.corrected < LOW_COUNT_WARN;
+}

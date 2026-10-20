@@ -8,6 +8,9 @@ import {
   decodeDensity,
   emptyAiState,
   encodeDensity,
+  estimateTooLow,
+  exemplarSizeRatio,
+  exemplarsTooDifferent,
   normalizeRect,
   removeCorrection,
   resultIsStale,
@@ -329,5 +332,24 @@ describe('Mode B crash detection', () => {
     expect(takeAiCrashReport()?.backend).toBe('webgpu');
     expect(store.get('countshard.ai.forceWasm')).toBe('1');
     delete (globalThis as { localStorage?: unknown }).localStorage;
+  });
+});
+
+describe('reliability warnings', () => {
+  it('flags exemplars of very different sizes', () => {
+    // From a user test: 48 × 64 px vs. a large box including the side of the profile.
+    const a = { w: 48, h: 64 };
+    const b = { w: 240, h: 170 };
+    expect(exemplarSizeRatio([a, b])).toBeGreaterThan(3);
+    expect(exemplarsTooDifferent([a, b])).toBe(true);
+    expect(exemplarsTooDifferent([a, { w: 52, h: 60 }, { w: 60, h: 70 }])).toBe(false);
+    expect(exemplarsTooDifferent([a])).toBe(false);
+  });
+
+  it('flags small estimates as unreliable', () => {
+    expect(estimateTooLow({ corrected: 8.4 })).toBe(true);
+    expect(estimateTooLow({ corrected: 14.9 })).toBe(true);
+    expect(estimateTooLow({ corrected: 37 })).toBe(false);
+    expect(estimateTooLow(null)).toBe(false);
   });
 });

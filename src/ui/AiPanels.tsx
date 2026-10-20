@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
 import type { AiState, Project } from '../model/types';
 import type { AiStatus } from '../ai/client';
-import { type EstimateSummary, removeCorrection, removeExemplar, resultIsStale, roundEstimate, setCorrectionCount } from '../ai/estimate';
+import { type EstimateSummary, estimateTooLow, exemplarSizeRatio, exemplarsTooDifferent, removeCorrection, removeExemplar, resultIsStale, roundEstimate, setCorrectionCount } from '../ai/estimate';
 import { totalBytes } from '../ai/modelStore';
 import type { Rect } from '../ai/estimate';
 import type { Commit } from './Workspace';
@@ -33,6 +33,10 @@ export function AiResultPanel({ project, summary }: { project: Project; summary:
       {res && project.ai && resultIsStale(project.ai) && <p className="small warn">{t.ai_stale}</p>}
       {res && res.exemplarsUsed.length < res.inputExemplarIds.length && <p className="small warn">{t.ai_exemplars_partial(res.exemplarsUsed.length, res.inputExemplarIds.length)}</p>}
       {res?.limitedByTiles && <p className="small warn">{t.ai_limited}</p>}
+      {estimateTooLow(summary) && <p className="small warn" data-testid="ai-warn-low">{t.ai_warn_low}</p>}
+      {res && project.ai && exemplarsTooDifferent(project.ai.exemplars) && (
+        <p className="small warn">{t.ai_warn_sizes(fmt(exemplarSizeRatio(project.ai.exemplars), 1))}</p>
+      )}
       <p className="muted tiny">{t.ai_result_note}</p>
       {res && (
         <p className="muted tiny">
@@ -114,6 +118,11 @@ export function AiPanel({
             </li>
           ))}
         </ol>
+      )}
+      {exemplarsTooDifferent(exemplars) && (
+        <p className="small warn" data-testid="ai-warn-sizes">
+          {t.ai_warn_sizes(fmt(exemplarSizeRatio(exemplars), 1))}
+        </p>
       )}
       <button className="btn primary" disabled={running || !status.downloaded || exemplars.length === 0} onClick={onRun} data-testid="ai-run">
         {ai?.result ? t.ai_rerun : t.ai_run}

@@ -243,6 +243,11 @@ export const en: typeof cs = {
   ai_err_run: (msg: string) => `AI estimate failed: ${msg}`,
   ai_err_load: 'The AI model could not be started. Reload the page or delete and re-download the model.',
   ai_qb: 'estimate',
+  ai_warn_sizes: (ratio: string) =>
+    `The examples differ a lot in size (up to ${ratio}×). The model then also looks for things other than your objects – mark examples of similar size, only the object's face without sides or surroundings.`,
+  ai_warn_low: 'An estimate below 15 is unreliable: the model is built for dozens to hundreds of small, similar items. Count a few large objects by hand instead.',
+  ai_warn_sizes_short: (ratio: string) => `Examples differ ${ratio}× in size – mark similar ones.`,
+  ai_warn_low_short: 'Small count – AI is unreliable here, count by hand instead.',
   ai_crashed: (gpu: boolean) =>
     `The AI estimate failed – the browser closed the page, most likely because the device ran out of memory. The project is still saved.` +
     (gpu ? ' Next time the slower but leaner computation (WASM) will be used.' : ' Try closing other tabs and apps, or use a smaller photo.'),

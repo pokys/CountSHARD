@@ -252,6 +252,11 @@ export const cs = {
   ai_err_run: (msg: string) => `AI odhad selhal: ${msg}`,
   ai_err_load: 'AI model se nepodařilo spustit. Zkuste stránku obnovit nebo model smazat a stáhnout znovu.',
   ai_qb: 'odhad',
+  ai_warn_sizes: (ratio: string) =>
+    `Vzory se velikostí hodně liší (až ${ratio}×). Model pak hledá i jiné věci než vaše objekty – označte vzory podobné velikosti, jen čelo objektu bez boků a okolí.`,
+  ai_warn_low: 'Odhad pod 15 ks je u AI nespolehlivý: model je stavěný na desítky až stovky malých, podobných kusů. Pár velkých objektů raději spočítejte ručně.',
+  ai_warn_sizes_short: (ratio: string) => `Vzory se velikostí liší ${ratio}× – označte podobně velké.`,
+  ai_warn_low_short: 'Malý počet – AI je zde nespolehlivá, raději spočítejte ručně.',
   ai_crashed: (gpu: boolean) =>
     `Odhad AI se nepodařil – prohlížeč stránku ukončil, nejspíš pro nedostatek paměti v zařízení. Projekt zůstal uložený.` +
     (gpu ? ' Příště se použije pomalejší, ale úspornější výpočet (WASM).' : ' Zkuste zavřít ostatní karty a aplikace, nebo použijte menší fotografii.'),

@@ -678,6 +678,13 @@ input[type='range'] {
   border-radius: 50%;
   background: var(--gc);
 }
+.qb-warn {
+  order: 11;
+  flex-basis: 100%;
+  margin: 0;
+  color: #fbbf24;
+  font-size: 0.85rem;
+}
 /* "Added · Undo" notice over the photo */
 .toast {
   position: absolute;
