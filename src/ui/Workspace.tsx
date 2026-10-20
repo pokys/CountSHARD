@@ -14,6 +14,7 @@ import {
   mergeDetections,
   newId,
   numbering,
+  removeGroup,
   removeObject,
   setObjectGroup,
   setReview,
@@ -724,17 +725,25 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             // Per-size-group counts in the circle colours, visible without scrolling.
             <div className="qb-groups" role="list" aria-label={t.groups_title} data-testid="quick-groups">
               {stats.groups.map((g) => (
-                <span
+                <button
                   key={g.group.id}
                   className="qb-group"
                   role="listitem"
                   style={{ ['--gc' as string]: g.group.color }}
-                  title={`${t.group} ${g.group.label} · Ø ${g.medianDiameterMm !== null ? `${fmt(g.medianDiameterMm, 1)} mm` : `${fmt(g.medianDiameterPx, 0)} px`}`}
+                  title={`${t.group} ${g.group.label} · Ø ${g.medianDiameterMm !== null ? `${fmt(g.medianDiameterMm, 1)} mm` : `${fmt(g.medianDiameterPx, 0)} px`} · ${t.qb_group_tap}`}
+                  disabled={!!progress}
+                  onClick={() => {
+                    const d = g.medianDiameterMm !== null ? `${fmt(g.medianDiameterMm, 1)} mm` : `${fmt(g.medianDiameterPx, 0)} px`;
+                    if (!confirm(t.qb_discard_confirm(g.group.label, g.count, d))) return;
+                    commit((p) => ({ ...p, ...removeGroup(p.objects, p.groups, g.group.id) }));
+                    showToast(t.toast_group_discarded(g.group.label, g.count));
+                  }}
+                  data-testid={`quick-group-${g.group.label}`}
                 >
                   <span className="qb-dot" aria-hidden="true" />
                   {g.group.label}
                   <strong>{g.count}</strong>
-                </span>
+                </button>
               ))}
             </div>
           )}
