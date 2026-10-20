@@ -401,6 +401,12 @@ and the panel's "Přepnout na LOCA" switches and remembers LOCA. GeCo2 on WASM 7
 same browser: **162 of 162 in 20.5 s** (estimate before the run: 22 s). Not yet tried in the
 app on the phones (the bench page measured them, see above).
 
+Exemplar adjustment (dev build, same photo): tap an exemplar → handles; dragging a corner
+resized 60 → 100 px, dragging inside moved it by 80 px; one undo reverts exactly one drag, redo
+restores it; three tight boxes of neighbouring pipes can be drawn one after another (a drag over
+an unselected exemplar draws a new box). Exemplars enlarged to ≈ 2× the pipes → the GeCo2 card
+warns "Vzory jsou 1,8× větší než nalezené kusy…" (count still 162).
+
 ### Reading the GeCo2 tables
 
 - **Pipes/rods (the app's use case): GeCo2 is near-perfect and object-exact.** Every scene

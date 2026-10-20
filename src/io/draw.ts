@@ -139,6 +139,8 @@ export interface AiOverlay {
   /** Rectangle being drawn. */
   draft?: { x: number; y: number; w: number; h: number; kind: 'exemplar' | 'region' } | null;
   selectedRegionId?: string | null;
+  /** Exemplar being edited: drawn solid, with corner handles. */
+  selectedExemplarId?: string | null;
 }
 
 function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, u: number, color: string) {
@@ -171,12 +173,23 @@ export function drawAiOverlay(ctx: CanvasRenderingContext2D, o: AiOverlay, pxPer
     label(ctx, r.label, r.x + 2 * u, r.y + 2 * u, u, AI_COLORS.region);
   }
   o.exemplars.forEach((e, i) => {
-    ctx.lineWidth = 2.5 * u;
-    ctx.setLineDash([6 * u, 4 * u]);
+    const sel = e.id === o.selectedExemplarId;
+    ctx.lineWidth = (sel ? 3 : 2.5) * u;
+    if (!sel) ctx.setLineDash([6 * u, 4 * u]);
     ctx.strokeStyle = AI_COLORS.exemplar;
     ctx.strokeRect(e.x, e.y, e.w, e.h);
     ctx.setLineDash([]);
     label(ctx, `${i + 1}`, e.x, Math.max(0, e.y - 20 * u), u, AI_COLORS.exemplar);
+    if (sel) {
+      const hs = 7 * u;
+      for (const [cx, cy] of [[e.x, e.y], [e.x + e.w, e.y], [e.x, e.y + e.h], [e.x + e.w, e.y + e.h]] as const) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(cx - hs, cy - hs, 2 * hs, 2 * hs);
+        ctx.lineWidth = 2 * u;
+        ctx.strokeStyle = '#0f172a';
+        ctx.strokeRect(cx - hs, cy - hs, 2 * hs, 2 * hs);
+      }
+    }
   });
   if (o.draft && o.draft.w > 0 && o.draft.h > 0) {
     ctx.lineWidth = 2 * u;

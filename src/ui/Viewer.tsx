@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 
 import type { CountedObject, SizeGroup } from '../model/types';
 import { type AiOverlay, drawAiOverlay, drawAnnotations, drawCountArea } from '../io/draw';
 import { hitTest } from '../state/project';
+import { draggedExemplar } from '../ai/estimate';
 
 /** Mode A: edit/select. Mode B (AI): draw exemplar boxes, draw correction regions, or just pan. */
 export type Tool = 'edit' | 'select' | 'exemplar' | 'region' | 'pan' | 'area';
@@ -29,6 +30,10 @@ interface Props {
   boxes?: Map<string, { w: number; h: number }> | null;
   /** Mode B: a rectangle was drawn with the exemplar or region tool (image coordinates). */
   onDrawRect?(kind: 'exemplar' | 'region' | 'area', x1: number, y1: number, x2: number, y2: number): void;
+  /** Mode B, exemplar tool: tap an exemplar to select it; drag it to move, drag a corner to resize. */
+  onSelectExemplar?(id: string | null): void;
+  /** `final` is false while dragging (coalesced into one undo step). */
+  onExemplarChange?(id: string, box: { x: number; y: number; w: number; h: number }, final: boolean): void;
   /** Counting area (both modes): the outside is dimmed. */
   area?: { x: number; y: number; w: number; h: number; poly?: [number, number][] } | null;
   /** Area tool: the finger/mouse path, in image coordinates (lasso or diagonal). */
@@ -54,10 +59,15 @@ type Gesture =
   | { kind: 'move'; id: string; dx: number; dy: number; moved: boolean }
   | { kind: 'resize'; id: string; moved: boolean }
   | { kind: 'pinch'; d0: number; cx0: number; cy0: number; view: View }
-  | { kind: 'rect'; tool: 'exemplar' | 'region' | 'area'; x0: number; y0: number; x1: number; y1: number }
+  | { kind: 'rect'; tool: 'exemplar' | 'region' | 'area'; x0: number; y0: number; x1: number; y1: number; tapExemplarId?: string | null }
+  | { kind: 'exemplar'; id: string; mode: 'move' | 'nw' | 'ne' | 'sw' | 'se'; x0: number; y0: number; orig: Box; moved: boolean }
   | { kind: 'lasso'; pts: [number, number][] };
 
 const TAP_SLOP = 7;
+/** Screen pixels around a selected exemplar's corner that grab the resize handle. */
+const HANDLE_GRAB = 22;
+
+type Box = { x: number; y: number; w: number; h: number };
 
 export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -235,7 +245,39 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       return;
     }
     if (p.ai && p.tool !== 'edit') {
-      if ((p.tool === 'exemplar' || p.tool === 'region') && p.showOverlay) {
+      if (p.tool === 'exemplar' && p.showOverlay) {
+        const s = view.current.s;
+        const exs = p.ai.exemplars;
+        const sel = exs.find((e) => e.id === p.ai!.selectedExemplarId);
+        if (sel) {
+          const corners: ['nw' | 'ne' | 'sw' | 'se', number, number][] = [
+            ['nw', sel.x, sel.y],
+            ['ne', sel.x + sel.w, sel.y],
+            ['sw', sel.x, sel.y + sel.h],
+            ['se', sel.x + sel.w, sel.y + sel.h],
+          ];
+          // Nearest corner within reach (on a small box the reach of neighbouring corners overlaps).
+          const c = corners
+            .map((k) => ({ k, d: Math.hypot(k[1] - pt.x, k[2] - pt.y) * s }))
+            .filter((x) => x.d < HANDLE_GRAB)
+            .sort((a, b) => a.d - b.d)[0]?.k;
+          if (c) {
+            gesture.current = { kind: 'exemplar', id: sel.id, mode: c[0], x0: pt.x, y0: pt.y, orig: { x: sel.x, y: sel.y, w: sel.w, h: sel.h }, moved: false };
+            return;
+          }
+        }
+        const inside = exs.filter((e) => pt.x >= e.x && pt.x <= e.x + e.w && pt.y >= e.y && pt.y <= e.y + e.h);
+        // Only the selected exemplar moves; over any other one a drag draws a new box (tight boxes
+        // of neighbouring objects touch) and a tap selects it.
+        if (sel && inside.some((e) => e.id === sel.id)) {
+          gesture.current = { kind: 'exemplar', id: sel.id, mode: 'move', x0: pt.x, y0: pt.y, orig: { x: sel.x, y: sel.y, w: sel.w, h: sel.h }, moved: false };
+          return;
+        }
+        const tapId = inside.sort((a, b) => a.w * a.h - b.w * b.h)[0]?.id ?? null;
+        gesture.current = { kind: 'rect', tool: 'exemplar', x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y, tapExemplarId: tapId };
+        return;
+      }
+      if (p.tool === 'region' && p.showOverlay) {
         gesture.current = { kind: 'rect', tool: p.tool, x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y };
         return;
       }
@@ -297,6 +339,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       g.x1 = pt.x;
       g.y1 = pt.y;
       requestDraw();
+    } else if (g.kind === 'exemplar') {
+      if (!g.moved && Math.hypot(pt.x - g.x0, pt.y - g.y0) * view.current.s <= TAP_SLOP) return;
+      g.moved = true;
+      p.onExemplarChange?.(g.id, draggedExemplar(g.orig, g.mode, pt.x - g.x0, pt.y - g.y0, p.image.width, p.image.height), false);
     } else if (g.kind === 'move') {
       g.moved = true;
       p.onMove(g.id, pt.x - g.dx, pt.y - g.dy, false);
@@ -327,9 +373,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       p.onDrawArea?.(g.pts);
       return;
     }
+    if (g.kind === 'exemplar') {
+      if (g.moved) p.onExemplarChange?.(g.id, draggedExemplar(g.orig, g.mode, pt.x - g.x0, pt.y - g.y0, p.image.width, p.image.height), true);
+      return;
+    }
     if (g.kind === 'rect') {
       requestDraw();
       if (Math.abs(pt.x - g.x0) * view.current.s > TAP_SLOP && Math.abs(pt.y - g.y0) * view.current.s > TAP_SLOP) p.onDrawRect?.(g.tool, g.x0, g.y0, pt.x, pt.y);
+      // A tap (no box) with the exemplar tool selects the exemplar under it, or clears the selection.
+      else if (g.tool === 'exemplar' && Math.hypot(pt.x - g.x0, pt.y - g.y0) * view.current.s <= TAP_SLOP) p.onSelectExemplar?.(g.tapExemplarId ?? null);
       return;
     }
     if (g.kind === 'tap-or-pan' && !g.moved && p.ai && p.tool !== 'edit') {

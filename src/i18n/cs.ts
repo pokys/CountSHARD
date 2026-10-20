@@ -238,7 +238,7 @@ export const cs = {
   ai_tool_exemplar: 'Vzor',
   ai_tool_region: 'Oprava oblasti',
   ai_tool_pan: 'Posun',
-  ai_tool_exemplar_hint: 'Tažením ohraničte jeden celý objekt. Nejlépe 3 typické kusy blízko sebe.',
+  ai_tool_exemplar_hint: 'Tažením těsně ohraničte jeden celý objekt (přibližte si snímek). Klepnutím na vzor ho vyberete: táhnutím posunete, za rohy změníte velikost.',
   ai_tool_region_hint: 'Tažením ohraničte oblast, kterou spočítáte sami; potom zadejte její skutečný počet.',
   ai_tool_pan_hint: 'Tažením posunete snímek, klepnutím vyberete opravenou oblast.',
   ai_exemplar: (i: number) => `Vzor ${i}`,
@@ -310,6 +310,10 @@ export const cs = {
   ai_det_info: (s: string, backend: string, size: number) => `Výpočet ${s} s · ${backend} · vstup ${size} px`,
   ai_det_counts: (auto: number, manual: number, rejected: number) => `${auto} nalezeno AI · ${manual} přidáno ručně · ${rejected} odebráno`,
   ai_det_small: 'Vzory jsou pro GeCo2 v tomto rozlišení velmi malé – drobné kusy mohou chybět. Vyfoťte zblízka nebo po částech.',
+  ai_det_ex_big: (r: string) =>
+    `Vzory jsou ${r}× větší než nalezené kusy – nejspíš zabírají víc než jeden objekt. Klepněte na vzor (nástroj „Vzor“), zmenšete ho za rohy těsně na jeden kus a spočítejte znovu.`,
+  ai_det_ex_small: (r: string) =>
+    `Vzory jsou ${r}× menší než nalezené kusy – nejspíš zabírají jen část objektu. Klepněte na vzor (nástroj „Vzor“), zvětšete ho za rohy na celý kus a spočítejte znovu.`,
   ai_tool_edit: 'Úpravy',
   ai_tool_edit_hint: 'Klepnutím na kus ho odeberete, klepnutím na prázdné místo přidáte chybějící.',
   ai_crash_geco2: 'Minulý výpočet GeCo2 stránku shodil (nejspíš došla paměť). Projekt zůstal uložený.',

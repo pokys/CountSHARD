@@ -229,7 +229,7 @@ export const en: typeof cs = {
   ai_tool_exemplar: 'Example',
   ai_tool_region: 'Correct region',
   ai_tool_pan: 'Pan',
-  ai_tool_exemplar_hint: 'Drag a box around one whole object. Ideally 3 typical items close to each other.',
+  ai_tool_exemplar_hint: 'Drag a tight box around one whole object (zoom in first). Tap an example to select it: drag to move, drag a corner to resize.',
   ai_tool_region_hint: 'Drag a box around a region you count yourself, then enter its true count.',
   ai_tool_pan_hint: 'Drag to pan the photo, tap to select a corrected region.',
   ai_exemplar: (i: number) => `Example ${i}`,
@@ -300,6 +300,10 @@ export const en: typeof cs = {
   ai_det_info: (s: string, backend: string, size: number) => `Computed in ${s} s · ${backend} · input ${size} px`,
   ai_det_counts: (auto: number, manual: number, rejected: number) => `${auto} found by AI · ${manual} added by hand · ${rejected} removed`,
   ai_det_small: 'The examples are very small for GeCo2 at this resolution – small items may be missed. Take the photo closer or in parts.',
+  ai_det_ex_big: (r: string) =>
+    `The examples are ${r}× larger than the items found – they probably cover more than one object. Tap an example (Example tool), drag its corners tightly around one item and count again.`,
+  ai_det_ex_small: (r: string) =>
+    `The examples are ${r}× smaller than the items found – they probably cover only part of an object. Tap an example (Example tool), drag its corners around the whole item and count again.`,
   ai_tool_edit: 'Edit',
   ai_tool_edit_hint: 'Tap an item to remove it, tap an empty spot to add a missing one.',
   ai_crash_geco2: 'The last GeCo2 run crashed the page (most likely out of memory). The project is still saved.',

@@ -5,7 +5,7 @@ import { median } from '../analysis/clustering';
 import { CancelledError, analysisClient } from '../analysis/client';
 import { ImageLoadError, analysisPixels, loadImageFile } from '../io/image';
 import { saveProject } from '../io/db';
-import { initHistory, push, redo, undo, type History } from '../state/history';
+import { dragMerge, initHistory, push, redo, undo, type History } from '../state/history';
 import {
   addManualObject,
   applyGrouping,
@@ -103,8 +103,11 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
   const resultRef = useRef<HTMLDivElement>(null);
 
+  // One drag (move/resize, exemplar handles, radius slider) = one undo step, see dragMerge.
+  const drag = useRef({ active: false, at: 0 });
   const commit: Commit = useCallback((fn, coalesce = false) => {
-    setHist((h) => push(h, { ...fn(h.present), updatedAt: new Date().toISOString() }, coalesce));
+    const merge = dragMerge(drag.current, coalesce, Date.now());
+    setHist((h) => push(h, { ...fn(h.present), updatedAt: new Date().toISOString() }, merge));
   }, []);
 
   // Autosave (debounced). The image blob was stored when the project was created.
@@ -300,6 +303,9 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const [pendingRegion, setPendingRegion] = useState<PendingRegion | null>(null);
   const [regionError, setRegionError] = useState<string | null>(null);
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
+  const [selectedExemplarId, setSelectedExemplarId] = useState<string | null>(null);
+  const onExemplarChange = (id: string, box: { x: number; y: number; w: number; h: number }, final: boolean) =>
+    commit((p) => (p.ai ? { ...p, ai: { ...p.ai, exemplars: p.ai.exemplars.map((e) => (e.id === id ? { ...e, ...box } : e)) } } : p), !final);
   const aiSummary = useMemo(() => (project.ai ? summarize(project.ai, project.countArea ?? null) : null), [project.ai, project.countArea]);
   const anyAiResult = project.ai?.result ?? null;
   /** LOCA density estimate (null for a GeCo2 result). */
@@ -478,6 +484,9 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     if (r.w < 4 || r.h < 4) return;
     if (kind === 'exemplar') {
       commit((p) => ({ ...p, ai: addExemplar(p.ai ?? emptyAiState(), { id: newId('e'), ...r }) }));
+      // Not selected automatically: the next box often starts at this one's corner (neighbouring
+      // objects) and must draw a new box, not resize this one. A tap selects it for adjusting.
+      setSelectedExemplarId(null);
       return;
     }
     if (!aiResult) return;
@@ -510,6 +519,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             ...(pendingRegion ? [{ id: 'pending', x: pendingRegion.x, y: pendingRegion.y, w: pendingRegion.w, h: pendingRegion.h, label: '?' }] : []),
           ],
           selectedRegionId,
+          selectedExemplarId: tool === 'exemplar' ? selectedExemplarId : null,
         }
       : null;
 
@@ -723,6 +733,8 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
           onDrawRect={onDrawRect}
           onDrawArea={onDrawArea}
           onSelectRegion={setSelectedRegionId}
+          onSelectExemplar={setSelectedExemplarId}
+          onExemplarChange={onExemplarChange}
           {...(mode === 'ai' ? detHandlers : handlers)}
         />
         {progress && (

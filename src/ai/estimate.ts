@@ -171,6 +171,26 @@ export function addExemplar(ai: AiState, box: AiBox): AiState {
   return { ...ai, exemplars: [...ai.exemplars, box].slice(-MAX_EXEMPLARS) };
 }
 
+/**
+ * Exemplar box after dragging it (`move`) or one of its corners by (dx, dy) image px: kept inside
+ * the image, normalised (a corner may be dragged past the opposite one), at least 4 px per side.
+ */
+export function draggedExemplar(orig: Rect, mode: 'move' | 'nw' | 'ne' | 'sw' | 'se', dx: number, dy: number, imgW: number, imgH: number): Rect {
+  if (mode === 'move') {
+    const x = Math.min(Math.max(0, orig.x + dx), Math.max(0, imgW - orig.w));
+    const y = Math.min(Math.max(0, orig.y + dy), Math.max(0, imgH - orig.h));
+    return { x, y, w: orig.w, h: orig.h };
+  }
+  let x1 = orig.x, y1 = orig.y, x2 = orig.x + orig.w, y2 = orig.y + orig.h;
+  if (mode === 'nw' || mode === 'sw') x1 += dx;
+  else x2 += dx;
+  if (mode === 'nw' || mode === 'ne') y1 += dy;
+  else y2 += dy;
+  const ax = Math.max(0, Math.min(x1, x2)), bx = Math.min(imgW, Math.max(x1, x2));
+  const ay = Math.max(0, Math.min(y1, y2)), by = Math.min(imgH, Math.max(y1, y2));
+  return { x: ax, y: ay, w: Math.max(4, bx - ax), h: Math.max(4, by - ay) };
+}
+
 export function removeExemplar(ai: AiState, id: string): AiState {
   return { ...ai, exemplars: ai.exemplars.filter((e) => e.id !== id) };
 }

@@ -8,7 +8,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   asCountedObjects,
+  EXEMPLAR_FIT_BIG,
+  EXEMPLAR_FIT_SMALL,
   countedDetections,
+  exemplarFit,
   geco2Boxes,
   geco2ContentSize,
   geco2Detect,
@@ -27,7 +30,7 @@ import { GECO2_BASE, geco2Assets } from '../../src/ai/modelStore';
 import { type AiDetection, type AiDetectionResult, type Project, isDensityResult, isDetectionResult } from '../../src/model/types';
 import { createProject, numbering } from '../../src/state/project';
 import { detectionSummary, parseProjectFile, toAiDetectionsCsv, toProjectFile } from '../../src/io/serialize';
-import { summarize } from '../../src/ai/estimate';
+import { draggedExemplar, summarize } from '../../src/ai/estimate';
 import { loadCv } from '../loadCv';
 import { makeScene } from '../synthetic/scene';
 
@@ -153,6 +156,30 @@ describe('editing detections (same rules as circle mode)', () => {
     const list = [det(0, 0, 10), det(20, 0, 12), det(40, 0, 14)];
     expect(typicalBox(list, 25, 5, 99)).toEqual({ w: 12, h: 12 });
     expect(typicalBox([], 0, 0, 33)).toEqual({ w: 33, h: 33 });
+  });
+});
+
+describe('adjusting exemplars and checking their size', () => {
+  const box = { x: 100, y: 100, w: 50, h: 40 };
+  it('moves inside the image and resizes by any corner, normalised', () => {
+    expect(draggedExemplar(box, 'move', 10, -20, 400, 300)).toEqual({ x: 110, y: 80, w: 50, h: 40 });
+    expect(draggedExemplar(box, 'move', 1000, 1000, 400, 300)).toEqual({ x: 350, y: 260, w: 50, h: 40 });
+    expect(draggedExemplar(box, 'se', -20, -10, 400, 300)).toEqual({ x: 100, y: 100, w: 30, h: 30 });
+    expect(draggedExemplar(box, 'nw', 10, 5, 400, 300)).toEqual({ x: 110, y: 105, w: 40, h: 35 });
+    // Corner dragged past the opposite one: the box flips instead of going negative.
+    expect(draggedExemplar(box, 'ne', -80, 0, 400, 300)).toEqual({ x: 70, y: 100, w: 30, h: 40 });
+    expect(draggedExemplar(box, 'sw', 50, 0, 400, 300).w).toBe(4);
+  });
+
+  it('compares the exemplar size with the items found', () => {
+    const found = [10, 11, 12, 10, 9, 11].map((s, i) => det(i * 20, 0, s));
+    expect(exemplarFit([{ w: 20, h: 20 }], found)).toBeCloseTo(20 / 11, 5);
+    expect(exemplarFit([{ w: 20, h: 20 }], found)!).toBeGreaterThan(EXEMPLAR_FIT_BIG);
+    expect(exemplarFit([{ w: 5, h: 5 }], found)!).toBeLessThan(EXEMPLAR_FIT_SMALL);
+    expect(exemplarFit([{ w: 11, h: 11 }], found)).toBeCloseTo(1, 5);
+    // Too few detections, or only manual / rejected ones: no verdict.
+    expect(exemplarFit([{ w: 20, h: 20 }], found.slice(0, 4))).toBeNull();
+    expect(exemplarFit([{ w: 20, h: 20 }], found.map((d) => ({ ...d, review: 'rejected' as const })))).toBeNull();
   });
 });
 

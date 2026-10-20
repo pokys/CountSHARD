@@ -4,7 +4,7 @@ import { type AiState, type Project, inCountArea, isDensityResult, isDetectionRe
 import { type AiStatus, aiClient } from '../ai/client';
 import { type EstimateSummary, estimateTooLow, exemplarSizeRatio, exemplarsTooDifferent, removeCorrection, removeExemplar, resultIsStale, roundEstimate, setCorrectionCount } from '../ai/estimate';
 import { type AiModelChoice, heavyModelWarning } from '../ai/device';
-import { GECO2_MIN_EXEMPLAR_PX, geco2ExemplarSide } from '../ai/geco2';
+import { EXEMPLAR_FIT_BIG, EXEMPLAR_FIT_SMALL, GECO2_MIN_EXEMPLAR_PX, exemplarFit, geco2ExemplarSide } from '../ai/geco2';
 import type { Rect } from '../ai/estimate';
 import type { Commit } from './Workspace';
 
@@ -23,6 +23,7 @@ export function AiDetectionResultPanel({ project, count }: { project: Project; c
   const inArea = res.objects.filter((d) => inCountArea(project.countArea, d.x + d.w / 2, d.y + d.h / 2));
   const counted = inArea.filter((d) => d.review !== 'rejected');
   const small = geco2ExemplarSide(res.exemplarsUsed, res.scale) < GECO2_MIN_EXEMPLAR_PX;
+  const fit = exemplarFit(res.exemplarsUsed, res.objects);
   return (
     <section className="card result" aria-live="polite">
       <div className="total">
@@ -37,6 +38,16 @@ export function AiDetectionResultPanel({ project, count }: { project: Project; c
       </p>
       {project.ai && resultIsStale(project.ai) && <p className="small warn">{t.ai_stale}</p>}
       {small && <p className="small warn">{t.ai_det_small}</p>}
+      {fit !== null && fit > EXEMPLAR_FIT_BIG && (
+        <p className="small warn" data-testid="ai-fit-warn">
+          {t.ai_det_ex_big(fmt(fit, 1))}
+        </p>
+      )}
+      {fit !== null && fit < EXEMPLAR_FIT_SMALL && (
+        <p className="small warn" data-testid="ai-fit-warn">
+          {t.ai_det_ex_small(fmt(1 / fit, 1))}
+        </p>
+      )}
       <p className="muted tiny">{t.ai_det_note}</p>
       <p className="muted tiny">{t.ai_det_info(fmt(res.durationMs / 1000, 1), res.engine, res.inputSize)}</p>
     </section>

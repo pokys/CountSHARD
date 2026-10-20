@@ -164,6 +164,23 @@ function detId(): string {
   return `d_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}${seq.toString(36)}`;
 }
 
+/** Exemplars more than this × larger, or smaller than its inverse, than the items found get a warning. */
+export const EXEMPLAR_FIT_BIG = 1.5;
+export const EXEMPLAR_FIT_SMALL = 0.6;
+
+/**
+ * Size of the exemplars relative to what the model found: mean exemplar side (√(w·h)) divided
+ * by the median side of the automatic detections that were not rejected. null with < 5 of them.
+ * Far from 1 usually means the exemplars were drawn around more (or less) than one object.
+ */
+export function exemplarFit(exemplars: Pick<AiBox, 'w' | 'h'>[], detections: AiDetection[]): number | null {
+  const side = (b: { w: number; h: number }) => Math.sqrt(Math.max(1, b.w) * Math.max(1, b.h));
+  const found = detections.filter((d) => d.source === 'auto' && d.review !== 'rejected').map(side).sort((a, b) => a - b);
+  if (found.length < 5 || !exemplars.length) return null;
+  const med = found[Math.floor(found.length / 2)]!;
+  return exemplars.reduce((a, e) => a + side(e), 0) / exemplars.length / med;
+}
+
 /** Model-pixel detections → project-pixel automatic detections. */
 export function toProjectDetections(d: Geco2Detections, scale: number): AiDetection[] {
   const out: AiDetection[] = [];

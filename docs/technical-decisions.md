@@ -267,6 +267,16 @@ phones, LOCA otherwise; manual choice of GeCo2 on a slow device shows the expect
 - Measured in the browser (Chromium, Intel iGPU): demo photo 162 of 162 on WebGPU 1024 px in
   5.1 s, and 162 of 162 on WASM 768 px in 20.5 s (benchmark estimate before the run: 22 s).
 
+**Exemplars after the first real-photo test (2026-10-20).** Exemplars stay axis-aligned
+rectangles: GeCo2 (like LOCA) takes only a box — the mean appearance inside it and its width
+and height — and was trained with axis-aligned boxes around objects in any orientation, so
+lassos or rotated boxes would be reduced to their bounding box anyway. What helps is precision:
+a tapped exemplar shows corner handles (drag inside = move, corner = resize; only the selected
+one moves, a drag over another one draws a new box because tight boxes of neighbours touch),
+and the GeCo2 result warns when the exemplars are > 1.5× larger or < 0.6× the median size of
+the items found. The same change made every drag one undo step (`dragMerge`); before, undo
+after moving or resizing a circle returned only to the last intermediate position.
+
 **Recommendation (before the phone test): GeCo2 only on strong devices with WebGPU, LOCA stays the default and the
 fallback; never GeCo2 on WASM.** Concretely: desktop/laptop with WebGPU → GeCo2 offered and
 "Automaticky" may pick it; iPhone 17 Pro class → the 768 px variant, and only after an
