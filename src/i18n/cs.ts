@@ -334,4 +334,15 @@ export const cs = {
   csv_det: {
     number: 'Číslo', x: 'X středu (px)', y: 'Y středu (px)', w: 'Šířka (px)', h: 'Výška (px)', source: 'Zdroj', review: 'Kontrola', score: 'Skóre modelu', model: 'Model',
   },
+  // layout: photo + floating tools + sheet
+  task_exemplar: 'Těsně ohraničte 1 kus (1–3 vzory, přibližte si fotku). Klepnutím na vzor ho upravíte.',
+  view_menu: 'Zobrazení',
+  done: 'Hotovo',
+  sheet_label: 'Výsledek a nastavení',
+  sheet_open: 'Rozbalit panel',
+  sheet_close: 'Sbalit panel',
+  qb_need_download: 'Nejdřív stáhněte AI model (rozbalte panel).',
+  tool_edit_hint_long: 'Klepnutím do prázdného místa přidáte objekt, klepnutím na značku ji odeberete. Podržením prstu na značce ji vyberete: pak ji táhnutím posunete, za okraj změníte velikost.',
+  more_options: 'Více možností (kalibrace, nastavení detekce, více fotek)',
+  ai_model_line: (choice: string, used: string, auto: boolean) => auto ? `AI model: ${choice} → ${used} · změnit` : `AI model: ${choice} · změnit`,
 };

@@ -55,7 +55,7 @@ interface View {
 
 type Gesture =
   | { kind: 'none' }
-  | { kind: 'tap-or-pan'; startX: number; startY: number; view: View; t0: number; moved: boolean; hitId: string | null }
+  | { kind: 'tap-or-pan'; startX: number; startY: number; view: View; t0: number; moved: boolean; hitId: string | null; selectOnly?: boolean }
   | { kind: 'move'; id: string; dx: number; dy: number; moved: boolean }
   | { kind: 'resize'; id: string; moved: boolean }
   | { kind: 'pinch'; d0: number; cx0: number; cy0: number; view: View }
@@ -64,6 +64,8 @@ type Gesture =
   | { kind: 'lasso'; pts: [number, number][] };
 
 const TAP_SLOP = 7;
+/** Holding a finger on an object this long (without moving) selects it in the edit tool. */
+const LONG_PRESS_MS = 450;
 /** Screen pixels around a selected exemplar's corner that grab the resize handle. */
 const HANDLE_GRAB = 22;
 
@@ -80,6 +82,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const propsRef = useRef(props);
   propsRef.current = props;
   const frame = useRef(0);
+  const longPress = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(longPress.current), []);
 
   const draw = useCallback(() => {
     frame.current = 0;
@@ -135,7 +139,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         showRejected: p.showRejected,
         reviewMarks: true,
       });
-      if (p.tool === 'select' && p.selectedId) {
+      if ((p.tool === 'select' || p.tool === 'edit') && p.selectedId) {
         const o = p.objects.find((x) => x.id === p.selectedId);
         if (o) {
           // Resize handle on the rim (east).
@@ -284,8 +288,26 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       gesture.current = { kind: 'tap-or-pan', startX: pt.sx, startY: pt.sy, view: { ...view.current }, t0: performance.now(), moved: false, hitId: null };
       return;
     }
-    if (p.tool === 'select' && p.showOverlay) {
+    // Edit tool with a selected object (selected by a long press): the selected object can be
+    // moved and resized directly; a tap elsewhere only changes the selection (never adds/removes).
+    const editSelected = p.tool === 'edit' && !p.boxes && !!p.selectedId && p.objects.some((o) => o.id === p.selectedId);
+    if ((p.tool === 'select' || editSelected) && p.showOverlay) {
       const sel = p.selectedId ? p.objects.find((o) => o.id === p.selectedId) : null;
+      if (editSelected && sel) {
+        const handleD = Math.hypot(pt.x - (sel.x + sel.r), pt.y - sel.y) * view.current.s;
+        const rimD = Math.abs(Math.hypot(pt.x - sel.x, pt.y - sel.y) - sel.r) * view.current.s;
+        if (handleD < 16 || (rimD < 8 && Math.hypot(pt.x - sel.x, pt.y - sel.y) > sel.r * 0.6)) {
+          gesture.current = { kind: 'resize', id: sel.id, moved: false };
+          return;
+        }
+        if (Math.hypot(pt.x - sel.x, pt.y - sel.y) <= Math.max(sel.r, 6)) {
+          gesture.current = { kind: 'move', id: sel.id, dx: pt.x - sel.x, dy: pt.y - sel.y, moved: false };
+          return;
+        }
+        const other = hitTest(p.objects, pt.x, pt.y);
+        gesture.current = { kind: 'tap-or-pan', startX: pt.sx, startY: pt.sy, view: { ...view.current }, t0: performance.now(), moved: false, hitId: other?.id ?? null, selectOnly: true };
+        return;
+      }
       if (sel) {
         const handleD = Math.hypot(pt.x - (sel.x + sel.r), pt.y - sel.y) * view.current.s;
         const rimD = Math.abs(Math.hypot(pt.x - sel.x, pt.y - sel.y) - sel.r) * view.current.s;
@@ -302,7 +324,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       }
     }
     const hit = p.showOverlay ? hitTest(p.objects, pt.x, pt.y) : null;
-    gesture.current = { kind: 'tap-or-pan', startX: pt.sx, startY: pt.sy, view: { ...view.current }, t0: performance.now(), moved: false, hitId: hit?.id ?? null };
+    const g: Gesture = { kind: 'tap-or-pan', startX: pt.sx, startY: pt.sy, view: { ...view.current }, t0: performance.now(), moved: false, hitId: hit?.id ?? null };
+    gesture.current = g;
+    // Long press on an object with the edit tool selects it (circle mode; AI boxes are not resizable).
+    if (p.tool === 'edit' && hit && !p.boxes) {
+      clearTimeout(longPress.current);
+      longPress.current = setTimeout(() => {
+        if (gesture.current !== g || g.moved) return;
+        gesture.current = { kind: 'none' };
+        navigator.vibrate?.(15);
+        propsRef.current.onSelect(hit.id);
+      }, LONG_PRESS_MS);
+    }
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -387,6 +420,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     if (g.kind === 'tap-or-pan' && !g.moved && p.ai && p.tool !== 'edit') {
       const r = p.ai.regions.find((q) => pt.x >= q.x && pt.x <= q.x + q.w && pt.y >= q.y && pt.y <= q.y + q.h);
       p.onSelectRegion?.(r?.id ?? null);
+      return;
+    }
+    if (g.kind === 'tap-or-pan' && !g.moved && g.selectOnly) {
+      p.onSelect(g.hitId);
       return;
     }
     if (g.kind === 'tap-or-pan' && !g.moved) {

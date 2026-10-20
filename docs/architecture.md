@@ -99,6 +99,23 @@ tests/
 7. **Crash guard**: the run marker records model + backend; after a GeCo2 crash on WebGPU the
    device uses WASM for GeCo2, and the AI panel offers switching to LOCA.
 
+## Workspace layout (since 1.1, 2026-10-21)
+
+- **Phones (≤ 860 px):** the photo fills the screen under the header; a bottom sheet
+  (`Workspace` `sheet`: peek / half / full, handle tap or swipe) holds everything else. Peek:
+  total, per-size-group counts (tap a group to discard it), main actions. Half/full: mode
+  switch, tool hint, sensitivity or AI panel, result and group cards, "Více možností"
+  (calibration, detection settings, multi-shot), export. The photo is fitted above the peek
+  (`--peek-h`, measured with a ResizeObserver); an expanded sheet covers it.
+- **Computers:** the same parts, the sheet is the right-hand panel (always fully visible).
+- **Tools** float over the photo in a pill: per mode 2–3 tools, undo/redo, fit, a "Zobrazení"
+  menu (marks, numbers, rejected, heat map, original). No select or pan tool: dragging pans in
+  every tool; in "Úpravy" a long press selects an object, which can then be moved/resized
+  directly. Drawing tools (Vzor, Oblast, Oprava oblasti) show a task banner with "Hotovo"
+  (exemplars also "Spočítat"); tapping the active drawing tool again ends drawing.
+- **GeCo2 size groups** are derived at display time from the box sizes of the counted
+  detections (`clusterRadii`, same separation as circle mode), not stored.
+
 ## Object model
 
 `CountedObject { id, x, y, r, source: auto|manual, review: unreviewed|confirmed|rejected,

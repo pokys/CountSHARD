@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
-import { type AiDetection, type CountArea, type MultiShotInfo, type Project, inCountArea, isCounted, isDensityResult, isDetectionResult, isSelectable } from '../model/types';
-import { median } from '../analysis/clustering';
+import { type AiDetection, type CountArea, type MultiShotInfo, type Project, type SizeGroup, inCountArea, isCounted, isDensityResult, isDetectionResult, isSelectable } from '../model/types';
+import { clusterRadii, median } from '../analysis/clustering';
 import { CancelledError, analysisClient } from '../analysis/client';
 import { ImageLoadError, analysisPixels, loadImageFile } from '../io/image';
 import { saveProject } from '../io/db';
@@ -9,7 +9,9 @@ import { dragMerge, initHistory, push, redo, undo, type History } from '../state
 import {
   addManualObject,
   applyGrouping,
+  GROUP_COLORS,
   computeStats,
+  groupLabel,
   makeCountAreaFromPath,
   mergeDetections,
   newId,
@@ -83,7 +85,6 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const [showNumbers, setShowNumbers] = useState(true);
   const [showRejected, setShowRejected] = useState(false);
   const [comparing, setComparing] = useState(false);
-  const compareRef = useRef<{ t0: number; wasOn: boolean } | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // Multi-shot: extra photos live only in memory; the fused result is saved with the project.
@@ -537,6 +538,28 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
 
   const regroup = (p: Project): Project => ({ ...p, ...applyGrouping(p.objects, p.groups, p.grouping, p.countArea ?? null) });
 
+  // GeCo2 size groups: derived from the box sizes of the counted detections (not stored), so the
+  // per-group counts are visible at once, like in circle mode.
+  const detGrouping = useMemo(() => {
+    const counted = detShown.filter(isCounted);
+    const none = { groups: [] as SizeGroup[], byId: new Map<string, string>() };
+    if (counted.length < 2) return none;
+    const res = clusterRadii(counted.map((o) => o.r), { mode: 'auto', minSeparation: project.grouping.minSeparation });
+    if (res.centers.length < 2) return none;
+    const order = res.centers.map((c, i) => ({ c, i })).sort((a, b) => a.c - b.c);
+    const groups: SizeGroup[] = order.map((o, k) => ({ id: `dg${o.i}`, label: groupLabel(k), color: GROUP_COLORS[k % GROUP_COLORS.length]! }));
+    return { groups, byId: new Map(counted.map((o, j) => [o.id, `dg${res.labels[j]}`])) };
+  }, [detShown, project.grouping.minSeparation]);
+  const detShownGrouped = useMemo(() => detShown.map((o) => ({ ...o, groupId: detGrouping.byId.get(o.id) ?? null })), [detShown, detGrouping]);
+  const detGroupStats = useMemo(
+    () =>
+      detGrouping.groups.map((g) => {
+        const members = detShownGrouped.filter((o) => o.groupId === g.id);
+        return { group: g, count: members.length, medianSidePx: 2 * median(members.map((o) => o.r)), ids: members.map((o) => o.id) };
+      }),
+    [detGrouping, detShownGrouped],
+  );
+
   /** Edits a GeCo2 result's detections (Mode B); the result's other fields stay. */
   const editDetections = (fn: (list: AiDetection[]) => AiDetection[]) =>
     commit((p) => (isDetectionResult(p.ai?.result) ? { ...p, ai: { ...p.ai!, result: { ...p.ai!.result, objects: fn(p.ai!.result.objects) } } } : p));
@@ -629,422 +652,500 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const confirmAll = () =>
     commit((p) => ({ ...p, objects: setReview(p.objects, p.objects.filter((o) => isCounted(o)).map((o) => o.id), 'confirmed') }));
 
+  // --- layout: photo over the whole stage, tools in a floating pill, everything else in the sheet ---
+  /** The tool used when no drawing tool is active. */
+  const defaultTool: Tool = mode === 'circles' || detResult ? 'edit' : 'pan';
+  const drawingTool = tool === 'exemplar' || tool === 'area' || tool === 'region';
+  const pickTool = (next: Tool) => {
+    setSelectedId(null);
+    setSelectedExemplarId(null);
+    // Tapping the active drawing tool again ends drawing.
+    setTool(next === tool && next !== defaultTool ? defaultTool : next);
+  };
+  const finishDrawing = () => {
+    setSelectedExemplarId(null);
+    setTool(defaultTool);
+  };
+  const [viewMenu, setViewMenu] = useState(false);
+  const [sheet, setSheet] = useState<'peek' | 'half' | 'full'>('peek');
+  const sheetDrag = useRef<{ y: number; moved: boolean } | null>(null);
+  const SHEET_ORDER = ['peek', 'half', 'full'] as const;
+  const moveSheet = (dir: 1 | -1) => setSheet((s) => SHEET_ORDER[Math.min(2, Math.max(0, SHEET_ORDER.indexOf(s) + dir))]!);
+  const peekRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  // The photo fits above the collapsed sheet (phones): the peek height is a CSS variable.
+  useEffect(() => {
+    const el = peekRef.current;
+    const main = mainRef.current;
+    if (!el || !main) return;
+    const ro = new ResizeObserver(() => main.style.setProperty('--peek-h', `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const toolButtons: { id: Tool; label: string; testId: string; disabled?: boolean }[] =
+    mode === 'circles'
+      ? [
+          { id: 'edit', label: t.ai_tool_edit, testId: 'tool-edit' },
+          { id: 'area', label: t.tool_area, testId: 'tool-area' },
+        ]
+      : [
+          { id: 'exemplar', label: t.ai_tool_exemplar, testId: 'tool-exemplar' },
+          ...(detResult
+            ? [{ id: 'edit' as Tool, label: t.ai_tool_edit, testId: 'tool-ai-edit' }]
+            : aiResult
+              ? [{ id: 'region' as Tool, label: t.ai_tool_region, testId: 'tool-region' }]
+              : []),
+          { id: 'area', label: t.tool_area, testId: 'tool-area' },
+        ];
+
+  const taskText =
+    tool === 'exemplar' ? t.task_exemplar : tool === 'area' ? t.tool_area_hint : tool === 'region' ? t.ai_tool_region_hint : null;
+  const canRunAi = !progress && aiStatus.downloaded && !!project.ai?.exemplars.length;
+
+  const discardDetGroup = (g: (typeof detGroupStats)[number]) => {
+    const d = `${fmt(g.medianSidePx, 0)} px`;
+    if (!confirm(t.qb_discard_confirm(g.group.label, g.count, d))) return;
+    editDetections((list) => g.ids.reduce((l, id) => removeAiDetection(l, id), list));
+    showToast(t.toast_group_discarded(g.group.label, g.count));
+  };
+
+  const groupChips =
+    mode === 'circles'
+      ? stats.groups.length > 1 &&
+        stats.groups.map((g) => {
+          const d = g.medianDiameterMm !== null ? `${fmt(g.medianDiameterMm, 1)} mm` : `${fmt(g.medianDiameterPx, 0)} px`;
+          return (
+            <button
+              key={g.group.id}
+              className="qb-group"
+              role="listitem"
+              style={{ ['--gc' as string]: g.group.color }}
+              title={`${t.group} ${g.group.label} · Ø ${d} · ${t.qb_group_tap}`}
+              disabled={!!progress}
+              onClick={() => {
+                if (!confirm(t.qb_discard_confirm(g.group.label, g.count, d))) return;
+                commit((p) => ({ ...p, ...removeGroup(p.objects, p.groups, g.group.id) }));
+                showToast(t.toast_group_discarded(g.group.label, g.count));
+              }}
+              data-testid={`quick-group-${g.group.label}`}
+            >
+              <span className="qb-dot" aria-hidden="true" />
+              {g.group.label}
+              <span className="qb-size">Ø {d}</span>
+              <strong>{g.count}</strong>
+            </button>
+          );
+        })
+      : detGroupStats.length > 1 &&
+        detGroupStats.map((g) => (
+          <button
+            key={g.group.id}
+            className="qb-group"
+            role="listitem"
+            style={{ ['--gc' as string]: g.group.color }}
+            title={`${t.group} ${g.group.label} · ${fmt(g.medianSidePx, 0)} px · ${t.qb_group_tap}`}
+            disabled={!!progress}
+            onClick={() => discardDetGroup(g)}
+            data-testid={`quick-group-${g.group.label}`}
+          >
+            <span className="qb-dot" aria-hidden="true" />
+            {g.group.label}
+            <span className="qb-size">{fmt(g.medianSidePx, 0)} px</span>
+            <strong>{g.count}</strong>
+          </button>
+        ));
+
+  const totalButton =
+    mode === 'circles' ? (
+      <span className="qb-total" aria-label={t.qb_total}>
+        <span className="qb-num" data-testid="quick-total">{stats.total}</span> {t.pcs}
+      </span>
+    ) : detResult || (!aiResult && aiModel === 'geco2') ? (
+      <span className="qb-total" aria-label={t.ai_det_tag}>
+        <span className="qb-num" data-testid="quick-det-total">{detResult ? detCount : '–'}</span> {t.pcs}
+        <span className="qb-sub">{t.ai_det_tag}</span>
+      </span>
+    ) : (
+      <span className="qb-total" aria-label={t.ai_estimate_label}>
+        <span className="estimate-tag">{t.ai_estimate_label}</span>{' '}
+        <span className="qb-num" data-testid="quick-estimate">{aiSummary ? t.ai_estimate(roundEstimate(aiSummary.corrected)) : '–'}</span> {t.pcs}
+      </span>
+    );
+
   return (
-    <main className="workspace">
-      <section className="stage" style={{ ["--img-ratio" as string]: String(session.canvas.height / session.canvas.width) }}>
-        <div className="modebar seg" role="radiogroup" aria-label={t.mode_label}>
-          <button className={mode === 'circles' ? 'on' : ''} onClick={() => setMode('circles')} role="radio" aria-checked={mode === 'circles'} disabled={!!progress} data-testid="mode-circles">
-            {t.mode_circles}
-          </button>
-          <button className={mode === 'ai' ? 'on' : ''} onClick={() => setMode('ai')} role="radio" aria-checked={mode === 'ai'} disabled={!!progress} data-testid="mode-ai">
-            {t.mode_ai}
-          </button>
-        </div>
-        <div className="toolbar" role="toolbar">
-          {mode === 'circles' ? (
-            <div className="seg" role="radiogroup">
-              <button className={tool === 'edit' ? 'on' : ''} onClick={() => setTool('edit')} role="radio" aria-checked={tool === 'edit'}>
-                {t.tool_edit}
+    <main className={`workspace ws-sheet-${sheet}`} ref={mainRef}>
+      <section className="stage">
+        <div className="viewer-wrap">
+          <Viewer
+            ref={viewerRef}
+            image={session.canvas}
+            objects={mode === 'ai' ? detShownGrouped : shownObjects}
+            groups={mode === 'ai' ? detGrouping.groups : project.groups}
+            area={project.countArea ?? null}
+            numbers={showNumbers ? (mode === 'ai' ? detNumbers : numbers) : null}
+            selectedId={mode === 'circles' ? selectedId : null}
+            tool={tool}
+            showOverlay={showOverlay && !comparing}
+            showRejected={showRejected}
+            ai={aiOverlay}
+            boxes={mode === 'ai' ? detBoxes : null}
+            onDrawRect={onDrawRect}
+            onDrawArea={onDrawArea}
+            onSelectRegion={setSelectedRegionId}
+            onSelectExemplar={setSelectedExemplarId}
+            onExemplarChange={onExemplarChange}
+            {...(mode === 'ai' ? detHandlers : handlers)}
+          />
+
+          <div className="stage-top">
+            <div className="pill" role="toolbar" aria-label={t.mode_label}>
+              <div className="seg" role="radiogroup">
+                {toolButtons.map((b) => (
+                  <button
+                    key={b.id}
+                    className={tool === b.id ? 'on' : ''}
+                    onClick={() => pickTool(b.id)}
+                    role="radio"
+                    aria-checked={tool === b.id}
+                    disabled={b.disabled}
+                    data-testid={b.testId}
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+              <button className="icon" onClick={() => setHist(undo)} disabled={!hist.past.length} title={t.undo} aria-label={t.undo}>
+                ↶
               </button>
-              <button className={tool === 'select' ? 'on' : ''} onClick={() => setTool('select')} role="radio" aria-checked={tool === 'select'}>
-                {t.tool_select}
+              <button className="icon" onClick={() => setHist(redo)} disabled={!hist.future.length} title={t.redo} aria-label={t.redo}>
+                ↷
               </button>
-              <button className={tool === 'area' ? 'on' : ''} onClick={() => setTool('area')} role="radio" aria-checked={tool === 'area'} data-testid="tool-area">
-                {t.tool_area}
+              <button className="icon desktop-only" onClick={() => viewerRef.current?.zoomBy(1.4)} title={t.zoom_in} aria-label={t.zoom_in}>
+                +
+              </button>
+              <button className="icon desktop-only" onClick={() => viewerRef.current?.zoomBy(1 / 1.4)} title={t.zoom_out} aria-label={t.zoom_out}>
+                −
+              </button>
+              <button className="icon" onClick={() => viewerRef.current?.fit()} title={t.zoom_fit} aria-label={t.zoom_fit}>
+                ⤢
+              </button>
+              <button
+                className={`icon${viewMenu || comparing || !showOverlay ? ' on' : ''}`}
+                onClick={() => setViewMenu((v) => !v)}
+                aria-expanded={viewMenu}
+                title={t.view_menu}
+                aria-label={t.view_menu}
+                data-testid="view-menu"
+              >
+                👁
               </button>
             </div>
-          ) : (
-            <div className="seg" role="radiogroup">
-              <button className={tool === 'exemplar' ? 'on' : ''} onClick={() => setTool('exemplar')} role="radio" aria-checked={tool === 'exemplar'} data-testid="tool-exemplar">
-                {t.ai_tool_exemplar}
-              </button>
-              {detResult ? (
-                <button className={tool === 'edit' ? 'on' : ''} onClick={() => setTool('edit')} role="radio" aria-checked={tool === 'edit'} data-testid="tool-ai-edit">
-                  {t.ai_tool_edit}
+            {viewMenu && (
+              <div className="view-menu" role="dialog" aria-label={t.view_menu}>
+                <label className="toggle">
+                  <input type="checkbox" checked={showOverlay} onChange={(e) => setShowOverlay(e.target.checked)} /> {t.overlay}
+                </label>
+                {mode === 'ai' && !detResult ? (
+                  <label className="toggle">
+                    <input type="checkbox" checked={showHeat} onChange={(e) => setShowHeat(e.target.checked)} /> {t.ai_heat}
+                  </label>
+                ) : (
+                  <>
+                    <label className="toggle">
+                      <input type="checkbox" checked={showNumbers} onChange={(e) => setShowNumbers(e.target.checked)} /> {t.numbers}
+                    </label>
+                    <label className="toggle">
+                      <input type="checkbox" checked={showRejected} onChange={(e) => setShowRejected(e.target.checked)} /> {t.show_rejected}
+                    </label>
+                  </>
+                )}
+                <label className="toggle">
+                  <input type="checkbox" checked={comparing} onChange={(e) => setComparing(e.target.checked)} data-testid="compare" /> {t.compare}
+                </label>
+              </div>
+            )}
+            {drawingTool && taskText && (
+              <div className="task" role="status" data-testid="task-banner">
+                <span>{taskText}</span>
+                <div className="row">
+                  {tool === 'exemplar' && (
+                    <button className="btn small primary" disabled={!canRunAi} onClick={runAi} data-testid="task-run">
+                      {aiModel === 'geco2' ? (detResult ? t.ai_rerun_detect : t.ai_run_detect) : aiResult ? t.ai_rerun : t.ai_run}
+                    </button>
+                  )}
+                  <button className="btn small" onClick={finishDrawing} data-testid="task-done">
+                    {t.done}
+                  </button>
+                </div>
+              </div>
+            )}
+            {toast && (
+              <div className="toast" role="status" key={toast.id}>
+                <span>{toast.text}</span>
+                {toast.undoable && (
+                  <button
+                    className="btn small"
+                    onClick={() => {
+                      setHist(undo);
+                      setToast(null);
+                    }}
+                  >
+                    {t.undo}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {progress && (
+            <div className="progress-overlay" role="status" aria-live="polite">
+              <div className="progress-card">
+                <p>
+                  {progress.phase === 'engine'
+                    ? t.loading_engine
+                    : progress.phase === 'fuse'
+                      ? t.ms_analyzing
+                      : progress.phase === 'ai-load'
+                        ? t.ai_loading_model
+                        : progress.phase === 'ai-run'
+                          ? aiModel === 'geco2'
+                            ? t.ai_detecting
+                            : t.ai_estimating
+                          : t.analyzing}
+                </p>
+                <progress value={progress.phase === 'engine' || progress.phase === 'ai-load' ? undefined : progress.fraction} max={1} />
+                <button className="btn small" onClick={() => (progress.phase.startsWith('ai') ? aiClient.cancel() : analysisClient.cancel())}>
+                  {t.cancel}
                 </button>
-              ) : (
-                <button
-                  className={tool === 'region' ? 'on' : ''}
-                  onClick={() => setTool('region')}
-                  role="radio"
-                  aria-checked={tool === 'region'}
-                  disabled={!aiResult}
-                  data-testid="tool-region"
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <aside className="side sheet" aria-label={t.sheet_label}>
+        <div ref={peekRef} className="sheet-peek">
+          <button
+            className="sheet-handle"
+            aria-label={sheet === 'peek' ? t.sheet_open : t.sheet_close}
+            onClick={() => {
+              if (sheetDrag.current?.moved) return;
+              setSheet((s) => (s === 'peek' ? 'half' : 'peek'));
+            }}
+            onPointerDown={(e) => {
+              sheetDrag.current = { y: e.clientY, moved: false };
+            }}
+            onPointerMove={(e) => {
+              const d = sheetDrag.current;
+              if (!d || d.moved || Math.abs(e.clientY - d.y) < 30) return;
+              d.moved = true;
+              moveSheet(e.clientY < d.y ? 1 : -1);
+            }}
+            onPointerUp={() => setTimeout(() => (sheetDrag.current = null), 0)}
+            data-testid="sheet-handle"
+          >
+            <span aria-hidden="true" />
+          </button>
+
+          {selected && mode === 'circles' && !progress && (
+            <div className="selbar" role="group" aria-label={t.selected}>
+              <span className="selbar-title">
+                {t.sel_title(numbers.get(selected.id) ?? 0, project.calibration ? `${fmt(2 * selected.r * project.calibration.mmPerPx, 1)} mm` : `${fmt(2 * selected.r, 0)} px`)}
+              </span>
+              {project.groups.length > 1 && (
+                <select
+                  aria-label={t.group}
+                  value={selected.groupId ?? ''}
+                  onChange={(e) => e.target.value && commit((p) => ({ ...p, objects: setObjectGroup(p.objects, [selected.id], e.target.value) }))}
                 >
-                  {t.ai_tool_region}
+                  {project.groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {selected.review !== 'confirmed' && (
+                <button className="btn small" onClick={() => commit((p) => ({ ...p, objects: setReview(p.objects, [selected.id], 'confirmed') }))}>
+                  {t.confirm}
                 </button>
               )}
-              <button className={tool === 'pan' ? 'on' : ''} onClick={() => setTool('pan')} role="radio" aria-checked={tool === 'pan'}>
-                {t.ai_tool_pan}
+              <button className="btn small danger" onClick={() => handlers.onRemove(selected.id)}>
+                {t.remove}
               </button>
-              <button className={tool === 'area' ? 'on' : ''} onClick={() => setTool('area')} role="radio" aria-checked={tool === 'area'}>
-                {t.tool_area}
+              <button className="icon" onClick={() => setSelectedId(null)} aria-label={t.sel_close} title={t.sel_close}>
+                ×
               </button>
             </div>
           )}
-          <div className="row">
-            <button className="icon" onClick={() => setHist(undo)} disabled={!hist.past.length} title={t.undo} aria-label={t.undo}>
-              ↶
-            </button>
-            <button className="icon" onClick={() => setHist(redo)} disabled={!hist.future.length} title={t.redo} aria-label={t.redo}>
-              ↷
-            </button>
-            <button className="icon" onClick={() => viewerRef.current?.zoomBy(1.4)} title={t.zoom_in} aria-label={t.zoom_in}>
-              +
-            </button>
-            <button className="icon" onClick={() => viewerRef.current?.zoomBy(1 / 1.4)} title={t.zoom_out} aria-label={t.zoom_out}>
-              −
-            </button>
-            <button className="icon" onClick={() => viewerRef.current?.fit()} title={t.zoom_fit} aria-label={t.zoom_fit}>
-              ⤢
-            </button>
-          </div>
-        </div>
-        <div className="viewer-wrap">
-        {toast && (
-          <div className="toast" role="status" key={toast.id}>
-            <span>{toast.text}</span>
-            {toast.undoable && (
-            <button
-              className="btn small"
-              onClick={() => {
-                setHist(undo);
-                setToast(null);
-              }}
-            >
-              {t.undo}
-            </button>
-            )}
-          </div>
-        )}
-        <Viewer
-          ref={viewerRef}
-          image={session.canvas}
-          objects={mode === 'ai' ? detShown : shownObjects}
-          groups={mode === 'ai' ? [] : project.groups}
-          area={project.countArea ?? null}
-          numbers={showNumbers ? (mode === 'ai' ? detNumbers : numbers) : null}
-          selectedId={tool === 'select' ? selectedId : null}
-          tool={tool}
-          showOverlay={showOverlay && !comparing}
-          showRejected={showRejected}
-          ai={aiOverlay}
-          boxes={mode === 'ai' ? detBoxes : null}
-          onDrawRect={onDrawRect}
-          onDrawArea={onDrawArea}
-          onSelectRegion={setSelectedRegionId}
-          onSelectExemplar={setSelectedExemplarId}
-          onExemplarChange={onExemplarChange}
-          {...(mode === 'ai' ? detHandlers : handlers)}
-        />
-        {progress && (
-          <div className="progress-overlay" role="status" aria-live="polite">
-            <div className="progress-card">
-              <p>
-                {progress.phase === 'engine'
-                  ? t.loading_engine
-                  : progress.phase === 'fuse'
-                    ? t.ms_analyzing
-                    : progress.phase === 'ai-load'
-                      ? t.ai_loading_model
-                      : progress.phase === 'ai-run'
-                        ? aiModel === 'geco2'
-                          ? t.ai_detecting
-                          : t.ai_estimating
-                        : t.analyzing}
-              </p>
-              <progress value={progress.phase === 'engine' || progress.phase === 'ai-load' ? undefined : progress.fraction} max={1} />
-              <button className="btn small" onClick={() => (progress.phase.startsWith('ai') ? aiClient.cancel() : analysisClient.cancel())}>
-                {t.cancel}
-              </button>
-            </div>
-          </div>
-        )}
-        </div>
-        {selected && tool === 'select' && !progress && (
-          <div className="selbar" role="group" aria-label={t.selected}>
-            <span className="selbar-title">
-              {t.sel_title(numbers.get(selected.id) ?? 0, project.calibration ? `${fmt(2 * selected.r * project.calibration.mmPerPx, 1)} mm` : `${fmt(2 * selected.r, 0)} px`)}
-            </span>
-            {project.groups.length > 1 && (
-              <select
-                aria-label={t.group}
-                value={selected.groupId ?? ''}
-                onChange={(e) => e.target.value && commit((p) => ({ ...p, objects: setObjectGroup(p.objects, [selected.id], e.target.value) }))}
-              >
-                {project.groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.label}
-                  </option>
-                ))}
-              </select>
-            )}
-            {selected.review !== 'confirmed' && (
-              <button className="btn small" onClick={() => commit((p) => ({ ...p, objects: setReview(p.objects, [selected.id], 'confirmed') }))}>
-                {t.confirm}
-              </button>
-            )}
-            <button className="btn small danger" onClick={() => handlers.onRemove(selected.id)}>
-              {t.remove}
-            </button>
-            <button className="icon" onClick={() => setSelectedId(null)} aria-label={t.sel_close} title={t.sel_close}>
-              ×
-            </button>
-          </div>
-        )}
-        {mode === 'circles' && <div className="sensbar">
-          <label htmlFor="sens-quick">{t.sensitivity}</label>
-          <span className="tiny muted-dark">{t.sens_less}</span>
-          <input
-            id="sens-quick"
-            type="range"
-            min={0}
-            max={100}
-            value={sens}
-            onChange={(e) => onSensitivity(Number(e.target.value))}
-            aria-describedby="sens-quick-hint"
-            data-testid="sens-quick"
-          />
-          <span className="tiny muted-dark">{t.sens_more}</span>
-          <output htmlFor="sens-quick">{sens}</output>
-          <span id="sens-quick-hint" hidden>
-            {t.sensitivity_hint} {t.rerun_hint}
-          </span>
-        </div>}
-        {mode === 'ai' ? (
+
           <div className="quickbar">
-            {detResult ? (
-              <button className="qb-total" onClick={() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} aria-label={t.ai_det_tag}>
-                <span className="qb-num" data-testid="quick-det-total">{detCount}</span> {t.pcs}
-              </button>
+            {totalButton}
+            {mode === 'circles' ? (
+              <>
+                <button
+                  className="btn small"
+                  disabled={!!progress || extraPhotos.length >= 4}
+                  onClick={() => moreRef.current?.click()}
+                  title={t.qb_more_photo_hint}
+                  data-testid="quick-more-photo"
+                >
+                  📷 {t.qb_more_photo}
+                  {extraPhotos.length > 0 && <span className="badge">{extraPhotos.length}</span>}
+                </button>
+                {extraPhotos.length > 0 && (
+                  <button className="btn small primary" disabled={!!progress} onClick={runFusion} data-testid="quick-fuse">
+                    {t.qb_fuse(extraPhotos.length + 1)}
+                  </button>
+                )}
+                {stats.total > 0 && (
+                  <button className="btn small" onClick={() => void exportPng()} title={t.export_png} data-testid="quick-png">
+                    ⬇ PNG
+                  </button>
+                )}
+              </>
             ) : (
-              <button className="qb-total" onClick={() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} aria-label={t.ai_estimate_label}>
-                <span className="estimate-tag">{t.ai_estimate_label}</span>{' '}
-                <span className="qb-num" data-testid="quick-estimate">{aiSummary ? t.ai_estimate(roundEstimate(aiSummary.corrected)) : '–'}</span> {t.pcs}
-              </button>
-            )}
-            <button className="btn small primary" disabled={!!progress || !aiStatus.downloaded || !(project.ai?.exemplars.length)} onClick={runAi} data-testid="quick-ai-run">
-              {aiModel === 'geco2' ? (detResult ? t.ai_rerun_detect : t.ai_run_detect) : aiResult ? t.ai_rerun : t.ai_run}
-            </button>
-            {anyAiResult && (
-              <button className="btn small" onClick={() => void exportPng()} title={t.export_png}>
-                ⬇ PNG
-              </button>
+              <>
+                <button className="btn small primary" disabled={!canRunAi} onClick={runAi} data-testid="quick-ai-run">
+                  {aiModel === 'geco2' ? (detResult ? t.ai_rerun_detect : t.ai_run_detect) : aiResult ? t.ai_rerun : t.ai_run}
+                </button>
+                {anyAiResult && (
+                  <button className="btn small" onClick={() => void exportPng()} title={t.export_png} data-testid="quick-png">
+                    ⬇ PNG
+                  </button>
+                )}
+              </>
             )}
             {project.countArea && (
               <button className="btn small" onClick={() => setCountArea(null)} title={t.area_clear_hint} data-testid="area-clear">
                 ✕ {t.area_clear}
               </button>
             )}
-            {(estimateTooLow(aiSummary) || exemplarsTooDifferent(project.ai?.exemplars ?? [])) && (
+            {groupChips && (
+              <div className="qb-groups" role="list" aria-label={t.groups_title} data-testid="quick-groups">
+                {groupChips}
+              </div>
+            )}
+            {mode === 'ai' && !project.ai?.exemplars.length && !progress && <p className="qb-hint">{t.ai_need_exemplar}</p>}
+            {mode === 'ai' && !aiStatus.downloaded && !!project.ai?.exemplars.length && <p className="qb-hint">{t.qb_need_download}</p>}
+            {mode === 'ai' && (estimateTooLow(aiSummary) || exemplarsTooDifferent(project.ai?.exemplars ?? [])) && (
               <p className="qb-warn" data-testid="quick-ai-warn">
                 ⚠ {estimateTooLow(aiSummary) ? t.ai_warn_low_short : t.ai_warn_sizes_short(fmt(exemplarSizeRatio(project.ai?.exemplars ?? []), 1))}
               </p>
             )}
-          </div>
-        ) : (
-        <div className="quickbar">
-          <button className="qb-total" onClick={() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} aria-label={t.qb_total}>
-            <span className="qb-num" data-testid="quick-total">{stats.total}</span> {t.pcs}
-          </button>
-          {stats.groups.length > 1 && (
-            // Per-size-group counts in the circle colours, visible without scrolling.
-            <div className="qb-groups" role="list" aria-label={t.groups_title} data-testid="quick-groups">
-              {stats.groups.map((g) => (
-                <button
-                  key={g.group.id}
-                  className="qb-group"
-                  role="listitem"
-                  style={{ ['--gc' as string]: g.group.color }}
-                  title={`${t.group} ${g.group.label} · Ø ${g.medianDiameterMm !== null ? `${fmt(g.medianDiameterMm, 1)} mm` : `${fmt(g.medianDiameterPx, 0)} px`} · ${t.qb_group_tap}`}
-                  disabled={!!progress}
-                  onClick={() => {
-                    const d = g.medianDiameterMm !== null ? `${fmt(g.medianDiameterMm, 1)} mm` : `${fmt(g.medianDiameterPx, 0)} px`;
-                    if (!confirm(t.qb_discard_confirm(g.group.label, g.count, d))) return;
-                    commit((p) => ({ ...p, ...removeGroup(p.objects, p.groups, g.group.id) }));
-                    showToast(t.toast_group_discarded(g.group.label, g.count));
-                  }}
-                  data-testid={`quick-group-${g.group.label}`}
-                >
-                  <span className="qb-dot" aria-hidden="true" />
-                  {g.group.label}
-                  <strong>{g.count}</strong>
-                </button>
-              ))}
-            </div>
-          )}
-          <button
-            className="btn small"
-            disabled={!!progress || extraPhotos.length >= 4}
-            onClick={() => moreRef.current?.click()}
-            title={t.qb_more_photo_hint}
-            data-testid="quick-more-photo"
-          >
-            📷 {t.qb_more_photo}
-            {extraPhotos.length > 0 && <span className="badge">{extraPhotos.length}</span>}
-          </button>
-          {extraPhotos.length > 0 && (
-            <button className="btn small primary" disabled={!!progress} onClick={runFusion} data-testid="quick-fuse">
-              {t.qb_fuse(extraPhotos.length + 1)}
-            </button>
-          )}
-          {stats.total > 0 && (
-            <button className="btn small" onClick={() => void exportPng()} title={t.export_png} data-testid="quick-png">
-              ⬇ PNG
-            </button>
-          )}
-          {project.countArea && (
-            <button className="btn small" onClick={() => setCountArea(null)} title={t.area_clear_hint} data-testid="area-clear">
-              ✕ {t.area_clear}
-            </button>
-          )}
-          <input
-            ref={moreRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            hidden
-            onChange={(e) => {
-              const files = [...(e.target.files ?? [])];
-              e.target.value = '';
-              if (files.length) void addExtraPhotos(files);
-            }}
-          />
-        </div>
-        )}
-        <div className="toolbar bottom">
-          <span className="hint">
-            {tool === 'area'
-              ? t.tool_area_hint
-              : tool === 'edit'
-              ? mode === 'ai'
-                ? t.ai_tool_edit_hint
-                : t.tool_edit_hint
-              : tool === 'select'
-                ? t.tool_select_hint
-                : tool === 'exemplar'
-                  ? t.ai_tool_exemplar_hint
-                  : tool === 'region'
-                    ? t.ai_tool_region_hint
-                    : t.ai_tool_pan_hint}
-          </span>
-          <div className="row">
-            <label className="toggle">
-              <input type="checkbox" checked={showOverlay} onChange={(e) => setShowOverlay(e.target.checked)} /> {t.overlay}
-            </label>
-            {mode === 'ai' && !detResult ? (
-              <label className="toggle">
-                <input type="checkbox" checked={showHeat} onChange={(e) => setShowHeat(e.target.checked)} /> {t.ai_heat}
-              </label>
-            ) : (
-              <>
-                <label className="toggle">
-                  <input type="checkbox" checked={showNumbers} onChange={(e) => setShowNumbers(e.target.checked)} /> {t.numbers}
-                </label>
-                <label className="toggle">
-                  <input type="checkbox" checked={showRejected} onChange={(e) => setShowRejected(e.target.checked)} /> {t.show_rejected}
-                </label>
-              </>
-            )}
-            <button
-              className={`btn ghost small hold-btn${comparing ? ' on' : ''}`}
-              aria-pressed={comparing}
-              title={t.compare_hint}
-              data-testid="compare"
-              onPointerDown={(e) => {
-                // iOS: keep the touch (no long-press callout/selection cancelling it).
-                e.preventDefault();
-                try {
-                  e.currentTarget.setPointerCapture(e.pointerId);
-                } catch {
-                  /* ignore */
-                }
-                compareRef.current = { t0: performance.now(), wasOn: comparing };
-                setComparing(true);
+            <input
+              ref={moreRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              hidden
+              onChange={(e) => {
+                const files = [...(e.target.files ?? [])];
+                e.target.value = '';
+                if (files.length) void addExtraPhotos(files);
               }}
-              onPointerUp={() => {
-                const c = compareRef.current;
-                compareRef.current = null;
-                if (!c) return;
-                // Short tap toggles; holding shows the original only while held.
-                const tap = performance.now() - c.t0 < 350;
-                setComparing(tap ? !c.wasOn : false);
-              }}
-              onPointerCancel={() => {
-                compareRef.current = null;
-                setComparing(false);
-              }}
-              onContextMenu={(e) => e.preventDefault()}
-              onClick={(e) => e.preventDefault()}
-            >
-              {comparing ? t.compare_on : t.compare}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <aside className="side">
-        {notice && <div className="banner info">{notice}</div>}
-        {mode === 'ai' ? (
-          <>
-            <div ref={resultRef}>
-              {detResult ? (
-                <AiDetectionResultPanel project={project} count={detCount} />
-              ) : aiResult || aiModel === 'loca' ? (
-                <AiResultPanel project={project} summary={aiSummary} />
-              ) : null}
-            </div>
-            <AiPanel
-              project={project}
-              commit={commit}
-              status={aiStatus}
-              downloadError={aiDownloadError}
-              running={!!progress}
-              onDownload={() => void downloadModel()}
-              onDeleteModel={() => void deleteModel()}
-              onChoice={(c) => void aiClient.setChoice(c)}
-              onRun={() => void runAi()}
-              summary={aiSummary}
-              pending={pendingRegion}
-              onPendingDone={finishRegion}
-              regionError={regionError}
-              selectedRegionId={selectedRegionId}
-              onSelectRegion={setSelectedRegionId}
             />
-          </>
-        ) : (
-        <>
-        <div ref={resultRef}>
-          <ResultPanel stats={stats} onConfirmAll={confirmAll} />
+          </div>
         </div>
-        {selected && (
-          <SelectedPanel
-            obj={selected}
-            number={numbers.get(selected.id) ?? 0}
-            project={project}
-            commit={commit}
-            onRemove={() => handlers.onRemove(selected.id)}
-          />
-        )}
-        <GroupsPanel project={project} stats={stats} commit={commit} />
-        <CalibrationPanel project={project} commit={commit} />
-        <SettingsPanel project={project} commit={commit} running={!!progress} onRun={() => runAnalysis()} />
-        <MultiShotPanel
-          photos={extraPhotos}
-          report={fusionReport}
-          running={!!progress}
-          onAdd={(files) => void addExtraPhotos(files)}
-          onRemove={(i) => setExtraPhotos((list) => list.filter((_, j) => j !== i))}
-          onRun={runFusion}
-        />
-        </>
-        )}
-        <ExportPanel project={project} canvas={session.canvas} commit={commit} />
-        <button className="btn ghost" onClick={onNewPhoto}>
-          {t.new_photo}
-        </button>
+
+        <div className="sheet-body">
+          <div className="modebar seg" role="radiogroup" aria-label={t.mode_label}>
+            <button className={mode === 'circles' ? 'on' : ''} onClick={() => setMode('circles')} role="radio" aria-checked={mode === 'circles'} disabled={!!progress} data-testid="mode-circles">
+              {t.mode_circles}
+            </button>
+            <button className={mode === 'ai' ? 'on' : ''} onClick={() => setMode('ai')} role="radio" aria-checked={mode === 'ai'} disabled={!!progress} data-testid="mode-ai">
+              {t.mode_ai}
+            </button>
+          </div>
+          {!drawingTool && (
+            <p className="muted tiny tool-hint">{mode === 'circles' ? t.tool_edit_hint_long : tool === 'edit' ? t.ai_tool_edit_hint : t.ai_tool_pan_hint}</p>
+          )}
+          {notice && <div className="banner info">{notice}</div>}
+          {mode === 'circles' && (
+            <div className="sensbar">
+              <label htmlFor="sens-quick">{t.sensitivity}</label>
+              <span className="tiny muted">{t.sens_less}</span>
+              <input
+                id="sens-quick"
+                type="range"
+                min={0}
+                max={100}
+                value={sens}
+                onChange={(e) => onSensitivity(Number(e.target.value))}
+                aria-describedby="sens-quick-hint"
+                data-testid="sens-quick"
+              />
+              <span className="tiny muted">{t.sens_more}</span>
+              <output htmlFor="sens-quick">{sens}</output>
+              <span id="sens-quick-hint" hidden>
+                {t.sensitivity_hint} {t.rerun_hint}
+              </span>
+            </div>
+          )}
+          {mode === 'ai' ? (
+            <>
+              <div ref={resultRef}>
+                {detResult ? (
+                  <AiDetectionResultPanel project={project} count={detCount} />
+                ) : aiResult || aiModel === 'loca' ? (
+                  <AiResultPanel project={project} summary={aiSummary} />
+                ) : null}
+              </div>
+              <AiPanel
+                project={project}
+                commit={commit}
+                status={aiStatus}
+                downloadError={aiDownloadError}
+                running={!!progress}
+                onDownload={() => void downloadModel()}
+                onDeleteModel={() => void deleteModel()}
+                onChoice={(c) => void aiClient.setChoice(c)}
+                onRun={() => void runAi()}
+                summary={aiSummary}
+                pending={pendingRegion}
+                onPendingDone={finishRegion}
+                regionError={regionError}
+                selectedRegionId={selectedRegionId}
+                onSelectRegion={setSelectedRegionId}
+              />
+            </>
+          ) : (
+            <>
+              <div ref={resultRef}>
+                <ResultPanel stats={stats} onConfirmAll={confirmAll} />
+              </div>
+              {selected && (
+                <SelectedPanel
+                  obj={selected}
+                  number={numbers.get(selected.id) ?? 0}
+                  project={project}
+                  commit={commit}
+                  onRemove={() => handlers.onRemove(selected.id)}
+                />
+              )}
+              <GroupsPanel project={project} stats={stats} commit={commit} />
+              <details className="more" data-testid="more-options">
+                <summary>{t.more_options}</summary>
+                <CalibrationPanel project={project} commit={commit} />
+                <SettingsPanel project={project} commit={commit} running={!!progress} onRun={() => runAnalysis()} />
+                <MultiShotPanel
+                  photos={extraPhotos}
+                  report={fusionReport}
+                  running={!!progress}
+                  onAdd={(files) => void addExtraPhotos(files)}
+                  onRemove={(i) => setExtraPhotos((list) => list.filter((_, j) => j !== i))}
+                  onRun={runFusion}
+                />
+              </details>
+            </>
+          )}
+          <ExportPanel project={project} canvas={session.canvas} commit={commit} />
+          <button className="btn ghost" onClick={onNewPhoto}>
+            {t.new_photo}
+          </button>
+        </div>
       </aside>
     </main>
   );
 }
-

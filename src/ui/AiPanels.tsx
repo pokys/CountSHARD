@@ -174,25 +174,31 @@ export function AiPanel({
         </div>
       )}
 
-      <label className="stack">
-        <span className="small">{t.ai_model_label}</span>
-        <select value={status.choice} disabled={running || !!dl} onChange={(e) => onChoice(e.target.value as AiModelChoice)} data-testid="ai-model">
-          <option value="auto">{t.ai_model_auto}</option>
-          <option value="loca">{t.ai_model_loca}</option>
-          <option value="geco2">{t.ai_model_geco2}</option>
-        </select>
-      </label>
-      {status.choice === 'auto' && !status.decision && <p className="muted tiny">{t.ai_auto_checking}</p>}
-      {autoText && <p className="muted tiny" data-testid="ai-auto-reason">{autoText}</p>}
-      {status.choice === 'geco2' && plan?.seconds !== null && plan?.seconds !== undefined && !warn && (
-        <p className="muted tiny">{t.ai_geco2_time(sec(plan.seconds), plan.measured)}</p>
-      )}
+      {/* One line by default (the automatic choice usually fits); the choice opens on tap. */}
+      <details className="model-pick">
+        <summary className="small" data-testid="ai-model-summary">
+          {t.ai_model_line(status.choice === 'auto' ? t.ai_model_auto : status.choice === 'loca' ? 'LOCA' : 'GeCo2', geco2 ? 'GeCo2' : 'LOCA', status.choice === 'auto')}
+        </summary>
+        <label className="stack">
+          <span className="small">{t.ai_model_label}</span>
+          <select value={status.choice} disabled={running || !!dl} onChange={(e) => onChoice(e.target.value as AiModelChoice)} data-testid="ai-model">
+            <option value="auto">{t.ai_model_auto}</option>
+            <option value="loca">{t.ai_model_loca}</option>
+            <option value="geco2">{t.ai_model_geco2}</option>
+          </select>
+        </label>
+        {status.choice === 'auto' && !status.decision && <p className="muted tiny">{t.ai_auto_checking}</p>}
+        {autoText && <p className="muted tiny" data-testid="ai-auto-reason">{autoText}</p>}
+        {status.choice === 'geco2' && plan?.seconds !== null && plan?.seconds !== undefined && !warn && (
+          <p className="muted tiny">{t.ai_geco2_time(sec(plan.seconds), plan.measured)}</p>
+        )}
+        <p className="muted tiny">{t.ai_model_note}</p>
+      </details>
       {warn && (
         <p className="small warn" data-testid="ai-heavy-warn">
           {warn.kind === 'memory' ? t.ai_geco2_warn_memory : t.ai_geco2_warn_slow(sec(warn.seconds))}
         </p>
       )}
-      <p className="muted tiny">{t.ai_model_note}</p>
 
       {!status.downloaded && status.decision && (
         <div className="ai-download">

@@ -390,12 +390,16 @@ input[type='range'] {
 }
 
 /* ---- workspace ---- */
+/* With a photo open the app is exactly one screen high; the photo takes all space left. */
+.app:has(.workspace) {
+  height: 100dvh;
+  min-height: 0;
+}
 .workspace {
   flex: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
   min-height: 0;
-  height: calc(100dvh - 52px);
 }
 .stage {
   position: relative;
@@ -415,11 +419,8 @@ input[type='range'] {
 .sensbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: #0f172a;
-  color: #e2e8f0;
-  border-top: 1px solid #1e293b;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   font-size: 0.9rem;
 }
 .sensbar label {
@@ -613,25 +614,31 @@ input[type='range'] {
   border-color: var(--focus);
 }
 
-/* action bar right under the photo */
+/* summary + main actions at the top of the sheet (always visible) */
 .quickbar {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 6px 12px 8px;
-  background: #0f172a;
-  color: #e2e8f0;
+  padding: 2px 0 6px;
 }
-.quickbar .btn {
-  background: #1e293b;
-  border-color: #334155;
-  color: #e2e8f0;
+.qb-sub {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 600;
 }
-.quickbar .btn.primary {
-  background: #22c55e;
-  border-color: #22c55e;
-  color: #052e16;
+.qb-size {
+  font-size: 0.8rem;
+  font-weight: 500;
+  opacity: 0.8;
+}
+.qb-hint {
+  order: 11;
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 .qb-total {
   background: none;
@@ -677,7 +684,7 @@ input[type='range'] {
   padding: 4px 10px 4px 8px;
   border-radius: 999px;
   border: 2px solid var(--gc);
-  background: color-mix(in srgb, var(--gc) 18%, #0f172a);
+  background: color-mix(in srgb, var(--gc) 16%, var(--surface));
   font-weight: 600;
   font-size: 0.95rem;
 }
@@ -695,7 +702,7 @@ input[type='range'] {
   order: 11;
   flex-basis: 100%;
   margin: 0;
-  color: #fbbf24;
+  color: var(--warn);
   font-size: 0.85rem;
 }
 /* press-and-hold buttons: no iOS long-press callout, selection or scrolling */
@@ -816,26 +823,228 @@ details.card[open] > .card-body {
   flex-wrap: wrap-reverse;
 }
 
+/* ---- photo overlays: tool pill, drawing task, view menu, notices ---- */
+.stage-top {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  pointer-events: none;
+}
+.stage-top > * {
+  pointer-events: auto;
+}
+.pill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.86);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  max-width: 100%;
+}
+.pill .seg {
+  border-color: #334155;
+}
+.icon.on {
+  background: #f8fafc;
+  color: #0f172a;
+}
+.view-menu,
+.task {
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+  border-radius: 12px;
+  padding: 8px 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-size: 0.9rem;
+}
+.view-menu {
+  display: grid;
+  gap: 2px;
+}
+.task {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  max-width: 560px;
+}
+.task > span {
+  flex: 1 1 220px;
+}
+.task .btn {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+.task .btn.primary {
+  background: #22c55e;
+  border-color: #22c55e;
+  color: #052e16;
+}
+.stage-top .toast {
+  position: static;
+  transform: none;
+  align-self: center;
+  animation: none;
+}
+
+/* ---- sheet (right panel on computers, bottom sheet on phones) ---- */
+.sheet-handle {
+  display: none;
+}
+.sheet-peek {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* Scrollable column: items keep their height (the mode switch has overflow: hidden). */
+.sheet-body > *,
+.sheet-peek > * {
+  flex-shrink: 0;
+}
+.side .seg {
+  border-color: var(--border);
+}
+.side .seg button {
+  color: var(--text);
+}
+.side .seg button.on {
+  background: var(--primary);
+  color: var(--primary-text);
+}
+.side .modebar {
+  margin: 0;
+  background: transparent;
+}
+.tool-hint {
+  margin: 0;
+}
+details.more > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 6px 0;
+}
+details.more[open] > summary {
+  margin-bottom: 8px;
+}
+details.more > .card,
+details.more > details {
+  margin-bottom: 12px;
+}
+
 @media (max-width: 860px) {
+  .desktop-only {
+    display: none;
+  }
   .workspace {
-    grid-template-columns: 1fr;
-    height: auto;
+    display: block;
+    position: relative;
+    overflow: hidden;
   }
+  /* The photo fills the screen above the collapsed sheet; an expanded sheet covers it. */
   .stage {
-    height: auto;
+    position: absolute;
+    inset: 0 0 var(--peek-h, 120px) 0;
   }
-  /* Photo area follows the photo's aspect ratio instead of a fixed, mostly empty band. */
   .viewer-wrap {
-    flex: none;
-    height: clamp(220px, calc(100vw * var(--img-ratio, 0.75)), 62dvh);
+    height: 100%;
   }
-  .side {
+  .pill {
+    gap: 3px;
+    padding: 4px;
+    flex-wrap: nowrap;
+  }
+  .pill .seg button {
+    padding: 6px 8px;
+    min-height: 36px;
+    font-size: 0.92rem;
+  }
+  .pill .icon {
+    min-width: 34px;
+    min-height: 36px;
+    padding: 0;
+    font-size: 1.05rem;
+  }
+  .side.sheet {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    gap: 0;
     border-left: 0;
-    overflow: visible;
+    overflow: hidden;
+    background: var(--surface);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.3);
+    max-height: calc(100% - 8px);
   }
-  .toolbar.bottom .hint {
-    flex-basis: 100%;
-    font-size: 0.8rem;
+  .sheet-peek {
+    flex: none;
+    padding: 0 12px 4px;
+  }
+  .sheet-handle {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 22px;
+    border: 0;
+    background: transparent;
+    cursor: grab;
+    touch-action: none;
+  }
+  .sheet-handle span {
+    width: 44px;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--border);
+  }
+  .sheet-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 4px 12px max(12px, env(safe-area-inset-bottom));
+  }
+  .workspace.ws-sheet-peek .sheet-body {
+    display: none;
+  }
+  .workspace.ws-sheet-peek .sheet-peek {
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+  .workspace.ws-sheet-half .side.sheet {
+    height: 55%;
+  }
+  .workspace.ws-sheet-full .side.sheet {
+    height: calc(100% - 8px);
+  }
+}
+@media (max-width: 360px) {
+  .pill .seg button {
+    padding: 6px 6px;
+    font-size: 0.85rem;
+  }
+  .pill .icon {
+    min-width: 30px;
   }
 }
 
@@ -916,4 +1125,12 @@ label.btn.disabled {
 }
 .ms-list input {
   width: 4.5em;
+}
+details.model-pick > summary {
+  cursor: pointer;
+  color: var(--focus);
+  padding: 4px 0;
+}
+details.model-pick[open] > summary {
+  margin-bottom: 6px;
 }

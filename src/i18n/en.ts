@@ -324,4 +324,14 @@ export const en: typeof cs = {
   csv_det: {
     number: 'Number', x: 'Centre X (px)', y: 'Centre Y (px)', w: 'Width (px)', h: 'Height (px)', source: 'Source', review: 'Review', score: 'Model score', model: 'Model',
   },
+  task_exemplar: 'Draw a tight box around 1 item (1–3 examples, zoom in first). Tap an example to adjust it.',
+  view_menu: 'View',
+  done: 'Done',
+  sheet_label: 'Result and settings',
+  sheet_open: 'Expand panel',
+  sheet_close: 'Collapse panel',
+  qb_need_download: 'Download the AI model first (expand the panel).',
+  tool_edit_hint_long: 'Tap an empty spot to add an object, tap a mark to remove it. Hold a mark to select it: then drag it to move, drag its rim to resize.',
+  more_options: 'More options (calibration, detection settings, more photos)',
+  ai_model_line: (choice: string, used: string, auto: boolean) => auto ? `AI model: ${choice} → ${used} · change` : `AI model: ${choice} · change`,
 };

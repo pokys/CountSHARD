@@ -471,6 +471,18 @@ warns "Vzory jsou 1,8× větší než nalezené kusy…" (count still 162).
   inside onnxruntime-web; final objectness within 0.04 of CPU and equal counts on the two
   photos tested. Phones were not tested.
 
+## Layout check (dev build, Chromium, 375 × 812 emulated phone and 1280 × 800, 2026-10-21)
+
+Demo photo, circle mode: whole screen without page scrolling; collapsed sheet shows 162 ks and
+groups A 134 / B 28 with their diameters; tool pill on one line (327 px wide at 375 px). Sheet
+handle → half: mode switch, hint, sensitivity, result card. Long press on a pipe selects it
+(bar "109 · Ø 51 px", count unchanged), a tap elsewhere only clears the selection; "Zobrazení"
+menu lists marks / numbers / rejected / original; a second tap on "Oblast" ends drawing. AI
+mode: "Vzor" active with the task banner (hint, "Spočítat kusy", "Hotovo"); GeCo2 on the
+emulated phone (WASM 768 px) → 163 (one manual item left from earlier edits), groups A 135 /
+B 28, tool switched to "Úpravy" after the run. 1280 × 800: photo 900 × 748 with the pill, sheet
+as a 380 px right panel. Not yet tried on real phones.
+
 ## Not yet tested (honest gaps)
 
 - **Real photographs.** No annotated real pipe photos are in the repo; synthetic
