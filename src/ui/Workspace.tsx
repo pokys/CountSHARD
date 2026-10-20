@@ -69,6 +69,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const [showNumbers, setShowNumbers] = useState(true);
   const [showRejected, setShowRejected] = useState(false);
   const [comparing, setComparing] = useState(false);
+  const compareRef = useRef<{ t0: number; wasOn: boolean } | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // Multi-shot: extra photos live only in memory; the fused result is saved with the project.
@@ -809,13 +810,37 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               </>
             )}
             <button
-              className="btn ghost small"
-              onPointerDown={() => setComparing(true)}
-              onPointerUp={() => setComparing(false)}
-              onPointerLeave={() => setComparing(false)}
-              onPointerCancel={() => setComparing(false)}
+              className={`btn ghost small hold-btn${comparing ? ' on' : ''}`}
+              aria-pressed={comparing}
+              title={t.compare_hint}
+              data-testid="compare"
+              onPointerDown={(e) => {
+                // iOS: keep the touch (no long-press callout/selection cancelling it).
+                e.preventDefault();
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {
+                  /* ignore */
+                }
+                compareRef.current = { t0: performance.now(), wasOn: comparing };
+                setComparing(true);
+              }}
+              onPointerUp={() => {
+                const c = compareRef.current;
+                compareRef.current = null;
+                if (!c) return;
+                // Short tap toggles; holding shows the original only while held.
+                const tap = performance.now() - c.t0 < 350;
+                setComparing(tap ? !c.wasOn : false);
+              }}
+              onPointerCancel={() => {
+                compareRef.current = null;
+                setComparing(false);
+              }}
+              onContextMenu={(e) => e.preventDefault()}
+              onClick={(e) => e.preventDefault()}
             >
-              {t.compare}
+              {comparing ? t.compare_on : t.compare}
             </button>
           </div>
         </div>

@@ -88,7 +88,9 @@ export const cs = {
   overlay: 'Značky',
   numbers: 'Čísla',
   show_rejected: 'Odebrané',
-  compare: 'Podržte pro originál',
+  compare: 'Originál',
+  compare_on: 'Zpět na značky',
+  compare_hint: 'Podržením zobrazíte originál bez značek, klepnutím ho přepnete natrvalo.',
   // results
   total: 'Celkem',
   pcs: 'ks',

@@ -694,6 +694,18 @@ input[type='range'] {
   color: #fbbf24;
   font-size: 0.85rem;
 }
+/* press-and-hold buttons: no iOS long-press callout, selection or scrolling */
+.hold-btn {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.hold-btn.on {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #f8fafc;
+}
 /* "Added · Undo" notice over the photo */
 .toast {
   position: absolute;

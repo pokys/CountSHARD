@@ -85,7 +85,9 @@ export const en: typeof cs = {
   overlay: 'Marks',
   numbers: 'Numbers',
   show_rejected: 'Removed',
-  compare: 'Hold for original',
+  compare: 'Original',
+  compare_on: 'Back to marks',
+  compare_hint: 'Hold to see the photo without marks; tap to toggle it.',
   total: 'Total',
   pcs: 'pcs',
   breakdown: (auto: number, manual: number, removed: number) =>
