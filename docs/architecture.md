@@ -113,6 +113,11 @@ tests/
   every tool; in "Úpravy" a long press selects an object, which can then be moved/resized
   directly. Drawing tools (Vzor, Oblast, Oprava oblasti) show a task banner with "Hotovo"
   (exemplars also "Spočítat"); tapping the active drawing tool again ends drawing.
+- **After the first phone feedback (2026-10-21):** the collapsed sheet also holds the mode
+  switch, circle-mode sensitivity (the photo stays visible while it moves) and, on first use of
+  an AI model, its download button instead of a disabled count button. Drawing banners are one
+  short line (the longer help is in the sheet); LOCA's correction tool is called "Opravit
+  počet" and asks for the true count right above the photo after the box is drawn.
 - **GeCo2 size groups** are derived at display time from the box sizes of the counted
   detections (`clusterRadii`, same separation as circle mode), not stored.
 

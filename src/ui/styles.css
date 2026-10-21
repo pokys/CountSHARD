@@ -1134,3 +1134,21 @@ details.model-pick > summary {
 details.model-pick[open] > summary {
   margin-bottom: 6px;
 }
+/* compact controls in the always-visible part of the sheet */
+.sheet-peek .modebar button {
+  min-height: 34px;
+  padding: 4px 10px;
+  font-size: 0.9rem;
+}
+.sheet-peek .sensbar input[type='range'] {
+  min-height: 32px;
+}
+.task input {
+  width: 5em;
+  min-height: 36px;
+  background: #0b1220;
+  color: #f8fafc;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 4px 8px;
+}

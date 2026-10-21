@@ -700,7 +700,33 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
         ];
 
   const taskText =
-    tool === 'exemplar' ? t.task_exemplar : tool === 'area' ? t.tool_area_hint : tool === 'region' ? t.ai_tool_region_hint : null;
+    tool === 'exemplar' ? t.task_exemplar : tool === 'area' ? t.task_area : tool === 'region' ? t.task_region : null;
+  /** Longer help for the current tool (in the sheet, not over the photo). */
+  const toolHelp =
+    tool === 'exemplar'
+      ? t.task_hint_exemplar
+      : tool === 'area'
+        ? t.tool_area_hint
+        : tool === 'region'
+          ? t.task_hint_region
+          : mode === 'circles'
+            ? t.tool_edit_hint_long
+            : tool === 'edit'
+              ? t.ai_tool_edit_hint
+              : t.ai_tool_pan_hint;
+  const [regionCount, setRegionCount] = useState('');
+  useEffect(() => setRegionCount(pendingRegion?.model != null ? String(roundEstimate(pendingRegion.model)) : ''), [pendingRegion]);
+  const modeSwitch = (
+    <div className="modebar seg" role="radiogroup" aria-label={t.mode_label}>
+      <button className={mode === 'circles' ? 'on' : ''} onClick={() => setMode('circles')} role="radio" aria-checked={mode === 'circles'} disabled={!!progress} data-testid="mode-circles">
+        {t.mode_circles}
+      </button>
+      <button className={mode === 'ai' ? 'on' : ''} onClick={() => setMode('ai')} role="radio" aria-checked={mode === 'ai'} disabled={!!progress} data-testid="mode-ai">
+        {t.mode_ai}
+      </button>
+    </div>
+  );
+  const dl = aiStatus.downloading;
   const canRunAi = !progress && aiStatus.downloaded && !!project.ai?.exemplars.length;
 
   const discardDetGroup = (g: (typeof detGroupStats)[number]) => {
@@ -880,6 +906,27 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                 </div>
               </div>
             )}
+            {pendingRegion && (
+              <div className="task" role="dialog" aria-label={t.ai_region_user} data-testid="region-ask">
+                <span>{pendingRegion.model !== null ? t.region_ask(fmt(pendingRegion.model, 1)) : t.ai_region_user}</span>
+                <div className="row">
+                  <input
+                    inputMode="numeric"
+                    value={regionCount}
+                    onChange={(e) => setRegionCount(e.target.value.replace(/[^0-9]/g, ''))}
+                    size={5}
+                    aria-label={t.ai_region_user}
+                    data-testid="region-count"
+                  />
+                  <button className="btn small primary" disabled={regionCount === ''} onClick={() => finishRegion(Number(regionCount))} data-testid="region-save">
+                    {t.save}
+                  </button>
+                  <button className="btn small" onClick={() => finishRegion(null)}>
+                    {t.cancel}
+                  </button>
+                </div>
+              </div>
+            )}
             {toast && (
               <div className="toast" role="status" key={toast.id}>
                 <span>{toast.text}</span>
@@ -980,6 +1027,8 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             </div>
           )}
 
+          {modeSwitch}
+          {notice && <div className="banner info small">{notice}</div>}
           <div className="quickbar">
             {totalButton}
             {mode === 'circles' ? (
@@ -1007,9 +1056,16 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               </>
             ) : (
               <>
-                <button className="btn small primary" disabled={!canRunAi} onClick={runAi} data-testid="quick-ai-run">
-                  {aiModel === 'geco2' ? (detResult ? t.ai_rerun_detect : t.ai_run_detect) : aiResult ? t.ai_rerun : t.ai_run}
-                </button>
+                {aiStatus.decision && !aiStatus.downloaded ? (
+                  // First use: the model download is the next step, not a disabled count button.
+                  <button className="btn small primary" disabled={!!dl} onClick={() => void downloadModel()} data-testid="quick-ai-download">
+                    {dl ? t.ai_downloading(Math.floor((100 * dl.loaded) / Math.max(1, dl.total))) : t.ai_download(fmt(aiStatus.missingBytes / 1e6, 0))}
+                  </button>
+                ) : (
+                  <button className="btn small primary" disabled={!canRunAi} onClick={runAi} data-testid="quick-ai-run">
+                    {aiModel === 'geco2' ? (detResult ? t.ai_rerun_detect : t.ai_run_detect) : aiResult ? t.ai_rerun : t.ai_run}
+                  </button>
+                )}
                 {anyAiResult && (
                   <button className="btn small" onClick={() => void exportPng()} title={t.export_png} data-testid="quick-png">
                     ⬇ PNG
@@ -1028,7 +1084,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               </div>
             )}
             {mode === 'ai' && !project.ai?.exemplars.length && !progress && <p className="qb-hint">{t.ai_need_exemplar}</p>}
-            {mode === 'ai' && !aiStatus.downloaded && !!project.ai?.exemplars.length && <p className="qb-hint">{t.qb_need_download}</p>}
+            {aiDownloadError && mode === 'ai' && <p className="qb-warn">{aiDownloadError}</p>}
             {mode === 'ai' && (estimateTooLow(aiSummary) || exemplarsTooDifferent(project.ai?.exemplars ?? [])) && (
               <p className="qb-warn" data-testid="quick-ai-warn">
                 ⚠ {estimateTooLow(aiSummary) ? t.ai_warn_low_short : t.ai_warn_sizes_short(fmt(exemplarSizeRatio(project.ai?.exemplars ?? []), 1))}
@@ -1047,22 +1103,8 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               }}
             />
           </div>
-        </div>
-
-        <div className="sheet-body">
-          <div className="modebar seg" role="radiogroup" aria-label={t.mode_label}>
-            <button className={mode === 'circles' ? 'on' : ''} onClick={() => setMode('circles')} role="radio" aria-checked={mode === 'circles'} disabled={!!progress} data-testid="mode-circles">
-              {t.mode_circles}
-            </button>
-            <button className={mode === 'ai' ? 'on' : ''} onClick={() => setMode('ai')} role="radio" aria-checked={mode === 'ai'} disabled={!!progress} data-testid="mode-ai">
-              {t.mode_ai}
-            </button>
-          </div>
-          {!drawingTool && (
-            <p className="muted tiny tool-hint">{mode === 'circles' ? t.tool_edit_hint_long : tool === 'edit' ? t.ai_tool_edit_hint : t.ai_tool_pan_hint}</p>
-          )}
-          {notice && <div className="banner info">{notice}</div>}
           {mode === 'circles' && (
+            // Always visible: the marks on the photo show the effect while the slider moves.
             <div className="sensbar">
               <label htmlFor="sens-quick">{t.sensitivity}</label>
               <span className="tiny muted">{t.sens_less}</span>
@@ -1083,6 +1125,10 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               </span>
             </div>
           )}
+        </div>
+
+        <div className="sheet-body">
+          <p className="muted tiny tool-hint">{toolHelp}</p>
           {mode === 'ai' ? (
             <>
               <div ref={resultRef}>

@@ -236,7 +236,7 @@ export const cs = {
   ai_delete: 'Smazat AI model ze zařízení',
   ai_step_exemplars: '1. Označte 1–3 vzorové objekty',
   ai_tool_exemplar: 'Vzor',
-  ai_tool_region: 'Oprava oblasti',
+  ai_tool_region: 'Opravit počet',
   ai_tool_pan: 'Posun',
   ai_tool_exemplar_hint: 'Tažením těsně ohraničte jeden celý objekt (přibližte si snímek). Klepnutím na vzor ho vyberete: táhnutím posunete, za rohy změníte velikost.',
   ai_tool_region_hint: 'Tažením ohraničte oblast, kterou spočítáte sami; potom zadejte její skutečný počet.',
@@ -335,7 +335,7 @@ export const cs = {
     number: 'Číslo', x: 'X středu (px)', y: 'Y středu (px)', w: 'Šířka (px)', h: 'Výška (px)', source: 'Zdroj', review: 'Kontrola', score: 'Skóre modelu', model: 'Model',
   },
   // layout: photo + floating tools + sheet
-  task_exemplar: 'Těsně ohraničte 1 kus (1–3 vzory, přibližte si fotku). Klepnutím na vzor ho upravíte.',
+  task_exemplar: 'Těsně ohraničte 1 kus (1–3 vzory).',
   view_menu: 'Zobrazení',
   done: 'Hotovo',
   sheet_label: 'Výsledek a nastavení',
@@ -345,4 +345,10 @@ export const cs = {
   tool_edit_hint_long: 'Klepnutím do prázdného místa přidáte objekt, klepnutím na značku ji odeberete. Podržením prstu na značce ji vyberete: pak ji táhnutím posunete, za okraj změníte velikost.',
   more_options: 'Více možností (kalibrace, nastavení detekce, více fotek)',
   ai_model_line: (choice: string, used: string, auto: boolean) => auto ? `AI model: ${choice} → ${used} · změnit` : `AI model: ${choice} · změnit`,
+  task_area: 'Obtáhněte oblast, kterou chcete počítat.',
+  task_region: 'Ohraničte část, kterou spočítáte sami.',
+  task_hint_exemplar: 'Vzor: táhnutím těsně ohraničte jeden celý kus (nejlépe si snímek přibližte), stačí 1–3 vzory. Klepnutím na vzor ho vyberete: táhnutím posunete, za rohy změníte velikost.',
+  task_hint_region: 'Opravit počet: ohraničte část snímku, kterou spočítáte sami, a zadejte její skutečný počet. V té části pak platí váš počet místo odhadu AI.',
+  region_ask: (model: string) => `Model zde odhaduje ≈ ${model}. Kolik kusů tu skutečně je?`,
+  save: 'Uložit',
 };

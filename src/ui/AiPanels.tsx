@@ -246,7 +246,7 @@ export function AiPanel({
               <p className="small">{pending.model !== null ? t.ai_region_model(fmt(pending.model, 1)) : ''}</p>
               <label className="inline">
                 <span>{t.ai_region_user}</span>
-                <input inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value.replace(/[^0-9]/g, ''))} size={6} autoFocus data-testid="ai-region-count" />
+                <input inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value.replace(/[^0-9]/g, ''))} size={6} data-testid="ai-region-count" />
               </label>
               <div className="row wrap">
                 <button className="btn small primary" disabled={count === '' || !Number.isInteger(countVal)} onClick={() => onPendingDone(countVal)} data-testid="ai-region-save">

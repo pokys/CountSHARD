@@ -227,7 +227,7 @@ export const en: typeof cs = {
   ai_delete: 'Delete AI model from this device',
   ai_step_exemplars: '1. Mark 1–3 example objects',
   ai_tool_exemplar: 'Example',
-  ai_tool_region: 'Correct region',
+  ai_tool_region: 'Fix count',
   ai_tool_pan: 'Pan',
   ai_tool_exemplar_hint: 'Drag a tight box around one whole object (zoom in first). Tap an example to select it: drag to move, drag a corner to resize.',
   ai_tool_region_hint: 'Drag a box around a region you count yourself, then enter its true count.',
@@ -324,7 +324,7 @@ export const en: typeof cs = {
   csv_det: {
     number: 'Number', x: 'Centre X (px)', y: 'Centre Y (px)', w: 'Width (px)', h: 'Height (px)', source: 'Source', review: 'Review', score: 'Model score', model: 'Model',
   },
-  task_exemplar: 'Draw a tight box around 1 item (1–3 examples, zoom in first). Tap an example to adjust it.',
+  task_exemplar: 'Draw a tight box around 1 item (1–3 examples).',
   view_menu: 'View',
   done: 'Done',
   sheet_label: 'Result and settings',
@@ -334,4 +334,10 @@ export const en: typeof cs = {
   tool_edit_hint_long: 'Tap an empty spot to add an object, tap a mark to remove it. Hold a mark to select it: then drag it to move, drag its rim to resize.',
   more_options: 'More options (calibration, detection settings, more photos)',
   ai_model_line: (choice: string, used: string, auto: boolean) => auto ? `AI model: ${choice} → ${used} · change` : `AI model: ${choice} · change`,
+  task_area: 'Trace the area you want to count.',
+  task_region: 'Draw a box around a part you count yourself.',
+  task_hint_exemplar: 'Example: drag a tight box around one whole item (zoom in first); 1–3 examples are enough. Tap an example to select it: drag to move, drag a corner to resize.',
+  task_hint_region: 'Fix count: draw a box around a part you count yourself and enter its true count. There your count replaces the AI estimate.',
+  region_ask: (model: string) => `The model estimates ≈ ${model} here. How many are there really?`,
+  save: 'Save',
 };
