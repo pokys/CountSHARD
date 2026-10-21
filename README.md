@@ -8,6 +8,14 @@ opravíte klepnutím. Vše běží v prohlížeči – fotografie zařízení ne
 groups them by size and lets you correct the result. Everything runs locally in
 the browser.*
 
+<p align="center">
+  <img src="docs/screenshots/phone.png" alt="CountSHARD na telefonu – spočítané trubky ve dvou velikostních skupinách" height="520">
+  &nbsp;
+  <img src="docs/screenshots/desktop.png" alt="CountSHARD na počítači – očíslované objekty, skupiny a výsledek" height="520">
+</p>
+
+*Ukázkový (syntetický) snímek: 162 trubek ve dvou velikostech, automaticky rozdělených do skupin.*
+
 ## Features (MVP)
 
 - Photo from file, drag & drop or the phone camera; EXIF orientation handled.
