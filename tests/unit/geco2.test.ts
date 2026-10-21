@@ -106,6 +106,16 @@ describe('GeCo2 post-processing (as in GeCo2 evaluation)', () => {
     expect(d.boxes[2]).toBeCloseTo((10 / 64 + 0.05) * 128, 4);
   });
 
+  it('drops a box nested inside a stronger one (NMS alone keeps it: low IoU)', () => {
+    const { obj, ltrb } = maps(64, [
+      { x: 20, y: 20, v: 1, half: 0.1 }, // big box
+      { x: 22, y: 20, v: 0.8, half: 0.02 }, // small box inside it
+      { x: 50, y: 50, v: 0.9, half: 0.02 }, // separate object
+    ]);
+    expect(geco2Detect(obj, ltrb, 64, 64, 128, { w: 128, h: 128 }, { nestedMax: 1 }).scores.length).toBe(3);
+    expect(geco2Detect(obj, ltrb, 64, 64, 128, { w: 128, h: 128 }).scores.length).toBe(2);
+  });
+
   it('drops detections whose centre lies in the padding', () => {
     const { obj, ltrb } = maps(64, [
       { x: 10, y: 10, v: 1, half: 0.02 },

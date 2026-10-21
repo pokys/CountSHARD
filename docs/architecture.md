@@ -87,7 +87,7 @@ tests/
 3. **Inference** (`ai.worker.ts` `detect`): photo scaled on the main thread (`geco2Scale`:
    longer side → S, mean exemplar side ≤ 80·S/1024), padded to S × S in the worker; backbone and
    head on WebGPU or WASM, the tiny exemplar graph (RoIAlign) always on WASM; `geco2Detect`
-   (local maxima > max/8, NMS 0.5, centres in the padding dropped) → boxes in model pixels.
+   (local maxima > max/8, NMS 0.5, boxes > 70 % inside a stronger one dropped, centres in the padding dropped) → boxes in model pixels.
 4. **Result** (`AiDetectionResult`): detections in project pixels (`AiDetection`: box, score,
    source, review), model id/name, engine, input size, scale. A re-run merges like circle mode
    (`mergeAiDetections`: manual/confirmed kept, rejected stay rejected).

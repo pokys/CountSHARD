@@ -32,7 +32,7 @@ DEBUG_SCENE=clutter DEBUG_PNG=/tmp/clutter.png npx vitest run tests/eval/debug
 | Mode B estimate correction: area-weighted region sums, corrected = raw − model(region) + user(region), count edit/remove, overlap/too-small/non-integer refused, never negative, ≤ 3 exemplars, stale result after exemplar change; heat-map ramp; CSV/JSON mark the estimate, round-trip, invalid density grid rejected, old projects default to round objects | `tests/unit/ai.test.ts` | unit |
 | Shipped model: file sizes + SHA-256 equal the download manifest; the int8 model runs in onnxruntime-web (WASM, Node, app session options) and counts a 480 × 360 synthetic rod scene within 10 %; one tile grows RSS by < 250 MB (memory regression guard) | `tests/unit/aiModel.test.ts` | smoke |
 | Crash detection: a leftover run marker is reported once; a WebGPU crash switches the device to WASM | `tests/unit/ai.test.ts` | unit |
-| GeCo2: scale rule (longer side → S, exemplar cap 80·S/1024), ImageNet input + padding, exemplar boxes; detection post-processing (peaks > max/8, NMS, padding filter); edits (remove → rejected / manual deleted, re-run keeps edits, counting area, numbering, tap-added size); automatic model choice (desktop WebGPU → GeCo2 1024, phones → WASM 768, slow / low-memory / unknown → LOCA, measured times override, warnings); download manifest; CSV / JSON (model recorded, count not estimate, malformed result rejected) | `tests/unit/geco2.test.ts` | unit |
+| GeCo2: scale rule (longer side → S, exemplar cap 80·S/1024), ImageNet input + padding, exemplar boxes; detection post-processing (peaks > max/8, NMS, nested-box filter, padding filter); edits (remove → rejected / manual deleted, re-run keeps edits, counting area, numbering, tap-added size); automatic model choice (desktop WebGPU → GeCo2 1024, phones → WASM 768, slow / low-memory / unknown → LOCA, measured times override, warnings); download manifest; CSV / JSON (model recorded, count not estimate, malformed result rejected) | `tests/unit/geco2.test.ts` | unit |
 | GeCo2 int8 graphs end to end through the app's TS pipeline (onnxruntime-web WASM): a 480 × 360 synthetic rod scene counted exactly, every box on a true rod — only with `GECO2_MODELS=<folder with the 768 px graphs>` | `tests/unit/geco2.test.ts` | smoke (opt-in) |
 
 Synthetic scenes (`tests/synthetic/scene.ts`) are deterministic (seeded) renders of
@@ -290,7 +290,9 @@ recommendation: `technical-decisions.md` ("Mode B — GeCo2 as a second model").
 the LOCA tables above (exemplars, images, mosaics; dumped by `scripts/geco2/dump-cases.ts`).
 GeCo2 preprocessing and counting as in its own `inference.py`: longer side → 1024 px, further
 down so the mean exemplar side is ≤ 80 px, pad to 1024 × 1024; local maxima of the objectness
-map above max/8, NMS (IoU 0.5), count = boxes left. GeCo2 never tiles.
+map above max/8, NMS (IoU 0.5), count = boxes left. GeCo2 never tiles. The app then also drops
+boxes nested > 70 % inside a stronger box (`containment_eval.py`: FSC MAE 15.5 → 10.6,
+synthetic 1.8 → 1.7); the tables below are without that step.
 
 Columns: **refine** = GeCo2's own pipeline in PyTorch incl. the SAM mask-decoder box
 refinement; **no refine** = PyTorch without it (what the exported graphs compute); **int8** =

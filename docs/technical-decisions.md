@@ -205,6 +205,11 @@ as for LOCA: **87.4 MB** (backbone 71.3 MB, head 16.0 MB) vs LOCA's 34.9 MB; the
 does not shrink at lower input sizes. GeCo2's optional SAM mask-decoder box refinement (needs
 SAM2 weights, runs per box) is not exported; it changes counts on dense FSC-147 photos by up
 to ≈ 6 % (fewer duplicates after NMS) and not at all on the synthetic scenes.
+Instead the app drops a box that lies mostly inside a stronger one (overlap > 70 % of the
+smaller box's area), which IoU-based NMS misses for a small box nested in a big one. Measured
+by `scripts/geco2/containment_eval.py` on the saved objectness maps: FSC-147 MAE 15.5 → 10.6
+(> 80 %: 11.1, > 60 %: 10.2), synthetic 1.8 → 1.7. 70 % was chosen as the safer of the two
+best values, since touching items rarely overlap that much.
 
 **Accuracy (same inputs as the LOCA eval).** Synthetic pipe/rod scenes — CountSHARD's actual
 use case — are GeCo2's strength: MAE 1.8 vs LOCA 19.6 (app tiling) / 23.1 (squash), and

@@ -13,7 +13,7 @@ export default defineConfig({
       manifest: {
         name: 'CountSHARD – počítání objektů na fotografii',
         short_name: 'CountSHARD',
-        description: 'Offline počítání trubek, tyčí a dalších objektů na fotografii. Snímky neopouštějí zařízení.',
+        description: 'Offline počítání objektů na fotografii – trubky a tyče z čela i jakékoli jiné kusy. Snímky neopouštějí zařízení.',
         lang: 'cs',
         start_url: './',
         scope: './',

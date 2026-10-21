@@ -6,3 +6,4 @@ coverage
 test-results
 *.tsbuildinfo
 tests/eval/.data
+__pycache__/

@@ -1,6 +1,6 @@
 export const cs = {
   appName: 'CountSHARD',
-  tagline: 'Počítání trubek, tyčí a dalších kulatých objektů na fotografii – offline, přímo v zařízení.',
+  tagline: 'Počítání objektů na fotografii – trubky a tyče z čela i jakékoli jiné kusy. Offline, přímo v zařízení.',
   // offline / status
   offline_title: 'Připravenost offline',
   offline_ready: 'Připraveno offline',
@@ -27,7 +27,7 @@ export const cs = {
   no: 'ne',
   // start
   drop_title: 'Přetáhněte sem fotografii',
-  drop_title_touch: 'Vyfoťte svazek z čela',
+  drop_title_touch: 'Vyfoťte, co chcete spočítat',
   drop_hint_touch: 'nebo vyberte hotovou fotografii z galerie',
   qb_more_photo: 'Další snímek',
   qb_more_photo_hint: 'Vyfoťte stejný svazek ze skoro stejného místa – objekty se spojí a každý se započte jen jednou.',
@@ -45,7 +45,7 @@ export const cs = {
   qb_total: 'Celkem',
   sel_title: (n: number, d: string) => `${n} · Ø ${d}`,
   sel_close: 'Zavřít',
-  drop_hint: 'nebo ji vyberte či pořiďte – svazek trubek nebo tyčí fotografovaný z čela',
+  drop_hint: 'nebo ji vyberte či pořiďte – svazek trubek z čela, paleta, regál, cokoli k počítání',
   pick_file: 'Vybrat fotografii',
   take_photo: 'Vyfotit',
   try_demo: 'Vyzkoušet na ukázce',
@@ -57,9 +57,9 @@ export const cs = {
   delete_confirm: (name: string) => `Opravdu smazat projekt „${name}“? Tuto akci nelze vrátit.`,
   tips_title: 'Jak fotit pro nejlepší výsledek',
   tips: [
-    'Fotografujte čela kolmo – objektiv v ose trubek.',
+    'Fotografujte kolmo – u trubek a tyčí objektiv v ose čel.',
     'Rovnoměrné světlo, bez ostrých stínů; blesk často pomůže.',
-    'Celý svazek v záběru, ale co nejblíž. Průměr jednoho čela by měl mít aspoň ~20 px.',
+    'Vše v záběru, ale co nejblíž. Jeden kus by měl mít aspoň ~20 px.',
     'Ostrý snímek – rozmazání snižuje přesnost.',
   ],
   // errors
@@ -71,6 +71,10 @@ export const cs = {
   err_storage: 'Projekt se nepodařilo uložit do zařízení (možná je plné úložiště).',
   // workspace
   new_photo: 'Nová fotografie',
+  new_count: 'Nové počítání',
+  new_short: 'Nové',
+  area_reset: 'Zrušit oblast',
+  area_active: 'Počítá se jen uvnitř oblasti.',
   analyzing: 'Hledám objekty…',
   loading_engine: 'Načítám detekční jádro (jen poprvé)…',
   cancel: 'Zrušit',

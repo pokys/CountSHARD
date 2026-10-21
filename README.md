@@ -1,11 +1,11 @@
 # CountSHARD
 
-**Offline počítání trubek, tyčí a dalších kulatých objektů na fotografii.**
-Vyfoťte svazek z čela, aplikace objekty spočítá, rozdělí podle průměru a vy chyby
+**Offline počítání objektů na fotografii – trubky a tyče z čela i jakékoli jiné kusy.**
+Vyfoťte svazek z čela nebo cokoli jiného, aplikace objekty spočítá, rozdělí do skupin a vy chyby
 opravíte klepnutím. Vše běží v prohlížeči – fotografie zařízení neopouštějí.
 
-*Offline-first PWA that counts pipes, rods and other round objects seen end-on,
-groups them by diameter and lets you correct the result. Everything runs locally in
+*Offline-first PWA that counts pipes and rods seen end-on or any other objects,
+groups them by size and lets you correct the result. Everything runs locally in
 the browser.*
 
 ## Features (MVP)

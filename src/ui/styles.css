@@ -1152,3 +1152,29 @@ details.model-pick[open] > summary {
   border-radius: 8px;
   padding: 4px 8px;
 }
+/* phones: the offline status is just its coloured dot (details on tap) */
+@media (max-width: 860px) {
+  .chip .chip-label {
+    display: none;
+  }
+  .chip {
+    padding: 4px 8px;
+  }
+  .topbar .brand span {
+    font-size: 1rem;
+  }
+}
+.topbar .btn {
+  white-space: nowrap;
+}
+.label-short {
+  display: none;
+}
+@media (max-width: 480px) {
+  .label-long {
+    display: none;
+  }
+  .label-short {
+    display: inline;
+  }
+}

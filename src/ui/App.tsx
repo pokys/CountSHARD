@@ -123,6 +123,19 @@ export function App() {
           <span>{t.appName}</span>
         </button>
         <div className="topbar-right">
+          {session && (
+            // Start over with another photo (camera, gallery, saved project, import).
+            <button
+              className="btn small primary"
+              onClick={() => {
+                setSession(null);
+                refreshRecent();
+              }}
+              data-testid="new-count"
+            >
+              ＋ <span className="label-long">{t.new_count}</span><span className="label-short">{t.new_short}</span>
+            </button>
+          )}
           <OfflineBadge engineLoaded={engineLoaded} />
           <button className="btn ghost small" onClick={() => setLang(lang === 'cs' ? 'en' : 'cs')} aria-label={t.lang}>
             {lang === 'cs' ? 'EN' : 'CS'}

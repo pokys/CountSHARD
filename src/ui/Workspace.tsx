@@ -91,7 +91,6 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const [extraPhotos, setExtraPhotos] = useState<ExtraPhoto[]>([]);
   const [fusionReport, setFusionReport] = useState<MultiShotInfo | null>(() => session.project.analysis?.multiShot ?? null);
   const viewerRef = useRef<ViewerHandle>(null);
-  const moreRef = useRef<HTMLInputElement>(null);
   const exportPng = useExportPng(hist.present, session.canvas);
   // Short "Added · Undo" notice after a tap edit, so an accidental tap is one tap away from undone.
   const [toast, setToast] = useState<{ text: string; id: number; undoable: boolean } | null>(null);
@@ -516,7 +515,8 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
           heatHeight: aiResult ? aiResult.gridH * aiResult.cellPx : 0,
           exemplars: project.ai?.exemplars ?? [],
           regions: [
-            ...(project.ai?.corrections ?? []).map((c) => ({ ...c, label: t.ai_region_label(c.userCount, fmt(aiSummary?.regions.find((q) => q.id === c.id)?.model ?? 0, 1)) })),
+            // Count corrections belong to a LOCA estimate only; a GeCo2 result is corrected item by item.
+            ...(aiResult ? (project.ai?.corrections ?? []) : []).map((c) => ({ ...c, label: t.ai_region_label(c.userCount, fmt(aiSummary?.regions.find((q) => q.id === c.id)?.model ?? 0, 1)) })),
             ...(pendingRegion ? [{ id: 'pending', x: pendingRegion.x, y: pendingRegion.y, w: pendingRegion.w, h: pendingRegion.h, label: '?' }] : []),
           ],
           selectedRegionId,
@@ -895,6 +895,11 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               <div className="task" role="status" data-testid="task-banner">
                 <span>{taskText}</span>
                 <div className="row">
+                  {tool === 'area' && project.countArea && (
+                    <button className="btn small" onClick={() => setCountArea(null)} title={t.area_clear_hint} data-testid="area-clear">
+                      {t.area_reset}
+                    </button>
+                  )}
                   {tool === 'exemplar' && (
                     <button className="btn small primary" disabled={!canRunAi} onClick={runAi} data-testid="task-run">
                       {aiModel === 'geco2' ? (detResult ? t.ai_rerun_detect : t.ai_run_detect) : aiResult ? t.ai_rerun : t.ai_run}
@@ -1033,21 +1038,6 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             {totalButton}
             {mode === 'circles' ? (
               <>
-                <button
-                  className="btn small"
-                  disabled={!!progress || extraPhotos.length >= 4}
-                  onClick={() => moreRef.current?.click()}
-                  title={t.qb_more_photo_hint}
-                  data-testid="quick-more-photo"
-                >
-                  📷 {t.qb_more_photo}
-                  {extraPhotos.length > 0 && <span className="badge">{extraPhotos.length}</span>}
-                </button>
-                {extraPhotos.length > 0 && (
-                  <button className="btn small primary" disabled={!!progress} onClick={runFusion} data-testid="quick-fuse">
-                    {t.qb_fuse(extraPhotos.length + 1)}
-                  </button>
-                )}
                 {stats.total > 0 && (
                   <button className="btn small" onClick={() => void exportPng()} title={t.export_png} data-testid="quick-png">
                     ⬇ PNG
@@ -1073,11 +1063,6 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                 )}
               </>
             )}
-            {project.countArea && (
-              <button className="btn small" onClick={() => setCountArea(null)} title={t.area_clear_hint} data-testid="area-clear">
-                ✕ {t.area_clear}
-              </button>
-            )}
             {groupChips && (
               <div className="qb-groups" role="list" aria-label={t.groups_title} data-testid="quick-groups">
                 {groupChips}
@@ -1090,18 +1075,6 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                 ⚠ {estimateTooLow(aiSummary) ? t.ai_warn_low_short : t.ai_warn_sizes_short(fmt(exemplarSizeRatio(project.ai?.exemplars ?? []), 1))}
               </p>
             )}
-            <input
-              ref={moreRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              hidden
-              onChange={(e) => {
-                const files = [...(e.target.files ?? [])];
-                e.target.value = '';
-                if (files.length) void addExtraPhotos(files);
-              }}
-            />
           </div>
           {mode === 'circles' && (
             // Always visible: the marks on the photo show the effect while the slider moves.
@@ -1129,6 +1102,14 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
 
         <div className="sheet-body">
           <p className="muted tiny tool-hint">{toolHelp}</p>
+          {project.countArea && (
+            <div className="row">
+              <span className="small">{t.area_active}</span>
+              <button className="btn small" onClick={() => setCountArea(null)} title={t.area_clear_hint}>
+                {t.area_reset}
+              </button>
+            </div>
+          )}
           {mode === 'ai' ? (
             <>
               <div ref={resultRef}>

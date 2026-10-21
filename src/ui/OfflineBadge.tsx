@@ -52,8 +52,8 @@ export function OfflineBadge({ engineLoaded }: { engineLoaded: boolean }) {
           {t.update_now}
         </button>
       )}
-      <button className={`chip ${tone}`} onClick={() => setOpen(!open)} aria-expanded={open} data-testid="offline-badge">
-        <span className="dot" aria-hidden="true" /> {label}
+      <button className={`chip ${tone}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-label={label} title={label} data-testid="offline-badge">
+        <span className="dot" aria-hidden="true" /> <span className="chip-label">{label}</span>
       </button>
       {open && status && (
         <div className="popover" role="dialog" aria-label={t.offline_title}>
