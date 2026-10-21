@@ -19,7 +19,7 @@ import {
   isSelectable,
 } from '../model/types';
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.2.0';
 
 /** Colours with a fixed meaning in the overlay; size groups must never use them (or look-alikes). */
 export const RESERVED_COLORS = { review: '#f59e0b', rejected: '#ef4444' } as const;
