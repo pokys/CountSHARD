@@ -81,7 +81,7 @@ export function StartScreen({ busy, recent, onFile, onDemo, onOpen, onDelete, on
                   <button className="link" onClick={() => onOpen(p.id)}>
                     <strong>{p.name}</strong>
                     <span className="muted">
-                      {p.total} {t.pcs} · {new Date(p.updatedAt).toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })}
+                      {p.total === null ? '–' : `${p.estimate ? '≈ ' : ''}${p.total} ${t.pcs}`} · {new Date(p.updatedAt).toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })}
                     </span>
                   </button>
                   <button className="btn ghost small" onClick={() => onDelete(p)} aria-label={`${t.delete} ${p.name}`}>

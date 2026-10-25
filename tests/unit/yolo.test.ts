@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import jpeg from 'jpeg-js';
+import { projectTotal } from '../../src/io/db';
 import {
   type YoloBox,
   YOLO_CLASSES,
@@ -202,5 +203,17 @@ describe('generated project names', () => {
   it('reads what, how many and when', () => {
     const iso = new Date(2026, 9, 25, 8, 5).toISOString();
     expect(autoProjectName('U profily 27 ks', iso)).toBe('U profily 27 ks – 25.10. 8:05');
+  });
+});
+
+describe('project list count', () => {
+  it('counts the mode the project was left in', () => {
+    const p = createProject({ name: 'x.jpg', width: 400, height: 200, originalWidth: 400, originalHeight: 200, mime: 'image/jpeg' });
+    expect(projectTotal(p)).toEqual({ total: null, estimate: false });
+    const objects = toProjectDetections({ boxes: new Float32Array([0, 0, 10, 10, 20, 0, 30, 10]), scores: new Float32Array([0.9, 0.8]), classes: new Uint8Array([3, 3]) }, 1);
+    const result = { kind: 'detections' as const, modelId: 'profiles', model: 'm', engine: 'x', inputSize: 640, scale: 1, objects, exemplarsUsed: [], inputExemplarIds: [], durationMs: 1, at: '' };
+    const q = { ...p, mode: 'profiles' as const, ai: { exemplars: [], corrections: [], result } };
+    expect(projectTotal(q)).toEqual({ total: 2, estimate: false });
+    expect(projectTotal({ ...q, mode: 'circles' })).toEqual({ total: null, estimate: false });
   });
 });

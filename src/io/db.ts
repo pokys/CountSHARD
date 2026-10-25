@@ -2,8 +2,10 @@
  * Local persistence in IndexedDB. Projects (annotations) and images (blobs) are
  * stored separately so the project list stays cheap to read.
  */
-import type { Project } from '../model/types';
+import { type Project, isDetectionResult } from '../model/types';
 import { computeStats } from '../state/project';
+import { countedDetections } from '../ai/geco2';
+import { roundEstimate, summarize } from '../ai/estimate';
 
 const DB_NAME = 'countshard';
 const DB_VERSION = 1;
@@ -12,8 +14,21 @@ export interface ProjectSummary {
   id: string;
   name: string;
   updatedAt: string;
-  total: number;
+  /** Count of the project's current mode; null before anything was counted. */
+  total: number | null;
+  /** The total is an AI density estimate, not counted items. */
+  estimate: boolean;
   groups: number;
+}
+
+/** What the project list shows: the count of the mode the project was left in. */
+export function projectTotal(p: Project): { total: number | null; estimate: boolean } {
+  const area = p.countArea ?? null;
+  if ((p.mode ?? 'circles') === 'circles') return { total: p.analysis || p.objects.length ? computeStats(p).total : null, estimate: false };
+  const r = p.ai?.result;
+  if (isDetectionResult(r)) return { total: countedDetections(r.objects, area).length, estimate: false };
+  const s = p.ai ? summarize(p.ai, area) : null;
+  return s ? { total: roundEstimate(s.corrected), estimate: true } : { total: null, estimate: false };
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -89,7 +104,7 @@ export async function listProjects(): Promise<ProjectSummary[]> {
   return all
     .map((p) => {
       const s = computeStats(p);
-      return { id: p.id, name: p.name, updatedAt: p.updatedAt, total: s.total, groups: s.groups.length };
+      return { id: p.id, name: p.name, updatedAt: p.updatedAt, ...projectTotal(p), groups: s.groups.length };
     })
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
