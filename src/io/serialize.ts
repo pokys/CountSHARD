@@ -84,9 +84,11 @@ export function toAiCsv(p: Project, o: AiCsvLabels): string {
 
 export interface AiDetectionCsvLabels {
   decimal: ',' | '.';
-  headers: { number: string; x: string; y: string; w: string; h: string; source: string; review: string; score: string; model: string };
+  headers: { number: string; x: string; y: string; w: string; h: string; source: string; review: string; score: string; model: string; type?: string };
   sourceLabels: Record<'auto' | 'manual', string>;
   reviewLabels: Record<'unreviewed' | 'confirmed', string>;
+  /** Names of the classes of a multi-class model (steel profiles), by class index. */
+  classLabels?: string[];
 }
 
 /**
@@ -98,7 +100,9 @@ export function toAiDetectionsCsv(p: Project, o: AiDetectionCsvLabels): string {
   const sep = o.decimal === ',' ? ';' : ',';
   const num = (v: number | null | undefined, digits = 1) => (v === null || v === undefined || Number.isNaN(v) ? '' : v.toFixed(digits).replace('.', o.decimal));
   const h = o.headers;
-  const rows: string[][] = [[h.number, h.x, h.y, h.w, h.h, h.source, h.review, h.score, h.model]];
+  const typed = isDetectionResult(res) && !!res.classes;
+  const rows: string[][] = [[h.number, h.x, h.y, h.w, h.h, ...(typed ? [h.type ?? 'Type'] : []), h.source, h.review, h.score, h.model]];
+  const typeName = (c: number | undefined) => (c === undefined ? '' : (o.classLabels?.[c] ?? (isDetectionResult(res) ? res.classes?.[c] : undefined) ?? String(c)));
   if (isDetectionResult(res)) {
     const area = p.countArea ?? null;
     const numbers = numbering(asCountedObjects(res.objects), area);
@@ -111,6 +115,7 @@ export function toAiDetectionsCsv(p: Project, o: AiDetectionCsvLabels): string {
           num(d.y + d.h / 2),
           num(d.w),
           num(d.h),
+          ...(typed ? [typeName(d.cls)] : []),
           o.sourceLabels[d.source],
           o.reviewLabels[d.review === 'confirmed' ? 'confirmed' : 'unreviewed'],
           num(d.score, 2),
@@ -132,13 +137,24 @@ export interface DetectionFileSummary {
   count: number;
   auto: number;
   manual: number;
+  /** Multi-class model: counted items per class name. */
+  byClass?: Record<string, number>;
 }
 
 export function detectionSummary(p: Project): DetectionFileSummary | null {
   const res = p.ai?.result;
   if (!isDetectionResult(res)) return null;
   const c = countedDetections(res.objects, p.countArea ?? null);
-  return { kind: 'detections', isEstimate: false, model: res.model, engine: res.engine, count: c.length, auto: c.filter((d) => d.source === 'auto').length, manual: c.filter((d) => d.source === 'manual').length };
+  const out: DetectionFileSummary = { kind: 'detections', isEstimate: false, model: res.model, engine: res.engine, count: c.length, auto: c.filter((d) => d.source === 'auto').length, manual: c.filter((d) => d.source === 'manual').length };
+  if (res.classes) {
+    const by: Record<string, number> = {};
+    for (const d of c) {
+      const k = d.cls === undefined ? 'unknown' : (res.classes[d.cls] ?? String(d.cls));
+      by[k] = (by[k] ?? 0) + 1;
+    }
+    out.byClass = by;
+  }
+  return out;
 }
 
 /** Machine-readable Mode B summary in exported project files. */
@@ -252,6 +268,8 @@ function validateAi(p: Project) {
     if (!Array.isArray(r.objects) || typeof r.model !== 'string' || !(r.scale > 0)) throw new ProjectFileError('ai');
     const states = ['unreviewed', 'confirmed', 'rejected'];
     if (!r.objects.every((d) => box(d) && (d.source === 'auto' || d.source === 'manual') && states.includes(d.review))) throw new ProjectFileError('ai');
+    if (r.classes !== undefined && (!Array.isArray(r.classes) || !r.classes.every((c) => typeof c === 'string'))) throw new ProjectFileError('ai');
+    if (!r.objects.every((d) => d.cls === undefined || (Number.isInteger(d.cls) && d.cls >= 0))) throw new ProjectFileError('ai');
   } else if (r) {
     if (typeof r.density !== 'string' || !(r.gridW > 0) || !(r.gridH > 0) || !(r.cellPx > 0) || !Number.isFinite(r.rawTotal)) throw new ProjectFileError('ai');
     let data: Float32Array;

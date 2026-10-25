@@ -28,11 +28,14 @@ import { Viewer, type Tool, type ViewerHandle } from './Viewer';
 import { CalibrationPanel, ExportPanel, type ExtraPhoto, GroupsPanel, MultiShotPanel, ResultPanel, SelectedPanel, SettingsPanel, useExportPng } from './Panels';
 import { AiDetectionResultPanel, AiPanel, AiResultPanel, type PendingRegion } from './AiPanels';
 import { type AiStatus, aiClient } from '../ai/client';
-import { AI_MODEL_ID, AiDownloadError, ORT_VERSION, geco2ModelId } from '../ai/modelStore';
+import { AI_MODEL_ID, AiDownloadError, ORT_VERSION, PROFILES_MODEL_ID, geco2ModelId } from '../ai/modelStore';
+import { YOLO_CLASSES, YOLO_SIZE } from '../ai/yolo';
 import {
   asCountedObjects,
   boxesOf,
+  classGroups,
   countedDetections,
+  detectionClassAt,
   geco2Boxes,
   geco2ContentSize,
   geco2Scale,
@@ -65,6 +68,9 @@ interface Progress {
 }
 
 /** Resizes the photo to the model scale chosen by the tile plan. */
+/** Longer side of the photo given to the steel-profile model (4 tiles × 640 px at most). */
+const PROFILES_MAX_SIDE = 2560;
+
 function scaledPixels(canvas: HTMLCanvasElement, w: number, h: number): ImageData {
   const c = document.createElement('canvas');
   c.width = w;
@@ -333,7 +339,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     if (progress) return;
     commit((p) => ({ ...p, mode: m, ai: p.ai ?? (m === 'ai' ? emptyAiState() : p.ai) }));
     if (m === 'ai') freeOpenCv();
-    setTool(m === 'ai' ? (detResult ? 'edit' : (project.ai?.exemplars.length ?? 0) > 0 ? 'pan' : 'exemplar') : 'edit');
+    setTool(m === 'ai' ? (detResult ? 'edit' : (project.ai?.exemplars.length ?? 0) > 0 || aiModel === 'profiles' ? 'pan' : 'exemplar') : 'edit');
     setPendingRegion(null);
     setSelectedId(null);
   };
@@ -350,7 +356,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
 
   const deleteModel = useCallback(async () => {
     const m = aiClient.model;
-    await aiClient.deleteModel(m === 'loca' ? 'loca' : aiClient.status.geco2?.size === 1024 ? 'geco2_1024' : 'geco2_768');
+    await aiClient.deleteModel(m === 'loca' || m === 'profiles' ? m : aiClient.status.geco2?.size === 1024 ? 'geco2_1024' : 'geco2_768');
   }, []);
 
   /** GeCo2: individual detections, merged with the user's earlier edits. */
@@ -376,7 +382,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     );
     const fresh = toProjectDetections(out, sx);
     commit((p) => {
-      const prev = isDetectionResult(p.ai?.result) ? p.ai!.result.objects : [];
+      const prev = isDetectionResult(p.ai?.result) && p.ai!.result.modelId === 'geco2' ? p.ai!.result.objects : [];
       return {
         ...p,
         ai: {
@@ -400,9 +406,52 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     setTool('edit');
   }, [hist.present.ai, session.canvas, commit, t]);
 
+  /** Steel profiles: detections with a class each, no exemplars; merged with earlier edits. */
+  const runProfiles = useCallback(async () => {
+    const W = session.canvas.width;
+    const H = session.canvas.height;
+    const k = Math.min(1, PROFILES_MAX_SIDE / Math.max(W, H));
+    const w = Math.max(1, Math.round(W * k));
+    const h = Math.max(1, Math.round(H * k));
+    const sx = w / W;
+    const out = await aiClient.profiles(
+      scaledPixels(session.canvas, w, h),
+      (f) => setProgress({ phase: 'ai-run', fraction: f }),
+      () => {
+        setNotice(t.ai_fallback_wasm);
+        setProgress({ phase: 'ai-load', fraction: 0 });
+      },
+    );
+    const fresh = toProjectDetections(out, sx);
+    commit((p) => {
+      const prev = isDetectionResult(p.ai?.result) && p.ai!.result.modelId === 'profiles' ? p.ai!.result.objects : [];
+      return {
+        ...p,
+        ai: {
+          ...(p.ai ?? emptyAiState()),
+          result: {
+            kind: 'detections',
+            modelId: 'profiles',
+            model: PROFILES_MODEL_ID,
+            engine: `onnxruntime-web ${ORT_VERSION} · ${out.backend === 'webgpu' ? 'WebGPU' : 'WASM'}`,
+            inputSize: YOLO_SIZE,
+            scale: sx,
+            objects: mergeAiDetections(prev, fresh),
+            classes: [...YOLO_CLASSES],
+            exemplarsUsed: [],
+            inputExemplarIds: [],
+            durationMs: out.durationMs,
+            at: new Date().toISOString(),
+          },
+        },
+      };
+    });
+    setTool('edit');
+  }, [session.canvas, commit, t]);
+
   const runAi = useCallback(async () => {
     const ai = hist.present.ai;
-    if (!ai || !ai.exemplars.length) {
+    if (aiClient.model !== 'profiles' && (!ai || !ai.exemplars.length)) {
       setNotice(t.ai_need_exemplar);
       return;
     }
@@ -424,6 +473,11 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
         await runGeco2();
         return;
       }
+      if (aiClient.model === 'profiles') {
+        await runProfiles();
+        return;
+      }
+      if (!ai) return;
       const exemplars = ai.exemplars;
       const plan = planTiles(session.canvas.width, session.canvas.height, exemplars);
       const scaled = scaledPixels(session.canvas, plan.width, plan.height);
@@ -466,7 +520,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     } finally {
       setProgress(null);
     }
-  }, [hist.present.ai, session.canvas, commit, onError, freeOpenCv, runGeco2, t]);
+  }, [hist.present.ai, session.canvas, commit, onError, freeOpenCv, runGeco2, runProfiles, t]);
 
   /** Sets (or clears) the counting area; size groups are recomputed for the objects inside it. */
   const setCountArea = (area: CountArea | null) =>
@@ -543,13 +597,26 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const detGrouping = useMemo(() => {
     const counted = detShown.filter(isCounted);
     const none = { groups: [] as SizeGroup[], byId: new Map<string, string>() };
+    // Steel profiles: one group per profile type found (when there are at least two types).
+    if (detResult?.classes) {
+      const cls = new Map(detResult.objects.map((d) => [d.id, d.cls]));
+      const by = classGroups(counted.map((o) => ({ id: o.id, cls: cls.get(o.id) })));
+      if (by.size < 2) return none;
+      const order = [...by.keys()].sort((a, b) => a - b);
+      const groups: SizeGroup[] = order.map((c, k) => ({
+        id: `dc${c}`,
+        label: t.ai_profiles_classes[c] ?? t.ai_profiles_unknown,
+        color: GROUP_COLORS[k % GROUP_COLORS.length]!,
+      }));
+      return { groups, byId: new Map(order.flatMap((c) => by.get(c)!.map((id): [string, string] => [id, `dc${c}`]))) };
+    }
     if (counted.length < 2) return none;
     const res = clusterRadii(counted.map((o) => o.r), { mode: 'auto', minSeparation: project.grouping.minSeparation });
     if (res.centers.length < 2) return none;
     const order = res.centers.map((c, i) => ({ c, i })).sort((a, b) => a.c - b.c);
     const groups: SizeGroup[] = order.map((o, k) => ({ id: `dg${o.i}`, label: groupLabel(k), color: GROUP_COLORS[k % GROUP_COLORS.length]! }));
     return { groups, byId: new Map(counted.map((o, j) => [o.id, `dg${res.labels[j]}`])) };
-  }, [detShown, project.grouping.minSeparation]);
+  }, [detShown, detResult, project.grouping.minSeparation, t]);
   const detShownGrouped = useMemo(() => detShown.map((o) => ({ ...o, groupId: detGrouping.byId.get(o.id) ?? null })), [detShown, detGrouping]);
   const detGroupStats = useMemo(
     () =>
@@ -574,7 +641,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
       const ex = project.ai?.exemplars ?? [];
       const fallback = ex.length ? ex.reduce((a, e) => a + (e.w + e.h) / 2, 0) / ex.length : Math.min(project.image.width, project.image.height) * 0.05;
       const b = typicalBox(detResult.objects, x, y, fallback);
-      editDetections((list) => [...list, newManualDetection(x, y, b.w, b.h)]);
+      editDetections((list) => [...list, newManualDetection(x, y, b.w, b.h, detResult.classes ? detectionClassAt(list, x, y) : undefined)]);
       showToast(t.toast_added);
     },
     onRemove: (id: string) => {
@@ -690,7 +757,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
           { id: 'area', label: t.tool_area, testId: 'tool-area' },
         ]
       : [
-          { id: 'exemplar', label: t.ai_tool_exemplar, testId: 'tool-exemplar' },
+          ...(aiModel === 'profiles' ? [] : [{ id: 'exemplar' as Tool, label: t.ai_tool_exemplar, testId: 'tool-exemplar' }]),
           ...(detResult
             ? [{ id: 'edit' as Tool, label: t.ai_tool_edit, testId: 'tool-ai-edit' }]
             : aiResult
@@ -727,7 +794,9 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     </div>
   );
   const dl = aiStatus.downloading;
-  const canRunAi = !progress && aiStatus.downloaded && !!project.ai?.exemplars.length;
+  const canRunAi = !progress && aiStatus.downloaded && (aiModel === 'profiles' || !!project.ai?.exemplars.length);
+  /** The chosen model finds individual items (GeCo2, steel profiles) rather than a density. */
+  const detModel = aiModel === 'geco2' || aiModel === 'profiles';
 
   const discardDetGroup = (g: (typeof detGroupStats)[number]) => {
     const d = `${fmt(g.medianSidePx, 0)} px`;
@@ -787,7 +856,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
       <span className="qb-total" aria-label={t.qb_total}>
         <span className="qb-num" data-testid="quick-total">{stats.total}</span> {t.pcs}
       </span>
-    ) : detResult || (!aiResult && aiModel === 'geco2') ? (
+    ) : detResult || (!aiResult && detModel) ? (
       <span className="qb-total" aria-label={t.ai_det_tag}>
         <span className="qb-num" data-testid="quick-det-total">{detResult ? detCount : '–'}</span> {t.pcs}
         <span className="qb-sub">{t.ai_det_tag}</span>
@@ -902,7 +971,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                   )}
                   {tool === 'exemplar' && (
                     <button className="btn small primary" disabled={!canRunAi} onClick={runAi} data-testid="task-run">
-                      {aiModel === 'geco2' ? (detResult ? t.ai_rerun_detect : t.ai_run_detect) : aiResult ? t.ai_rerun : t.ai_run}
+                      {detModel ? (detResult ? t.ai_rerun_detect : t.ai_run_detect) : aiResult ? t.ai_rerun : t.ai_run}
                     </button>
                   )}
                   <button className="btn small" onClick={finishDrawing} data-testid="task-done">
@@ -961,7 +1030,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                       : progress.phase === 'ai-load'
                         ? t.ai_loading_model
                         : progress.phase === 'ai-run'
-                          ? aiModel === 'geco2'
+                          ? detModel
                             ? t.ai_detecting
                             : t.ai_estimating
                           : t.analyzing}
@@ -1053,7 +1122,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                   </button>
                 ) : (
                   <button className="btn small primary" disabled={!canRunAi} onClick={runAi} data-testid="quick-ai-run">
-                    {aiModel === 'geco2' ? (detResult ? t.ai_rerun_detect : t.ai_run_detect) : aiResult ? t.ai_rerun : t.ai_run}
+                    {detModel ? (detResult ? t.ai_rerun_detect : t.ai_run_detect) : aiResult ? t.ai_rerun : t.ai_run}
                   </button>
                 )}
                 {anyAiResult && (
@@ -1068,7 +1137,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                 {groupChips}
               </div>
             )}
-            {mode === 'ai' && !project.ai?.exemplars.length && !progress && <p className="qb-hint">{t.ai_need_exemplar}</p>}
+            {mode === 'ai' && aiModel !== 'profiles' && !project.ai?.exemplars.length && !progress && <p className="qb-hint">{t.ai_need_exemplar}</p>}
             {aiDownloadError && mode === 'ai' && <p className="qb-warn">{aiDownloadError}</p>}
             {mode === 'ai' && (estimateTooLow(aiSummary) || exemplarsTooDifferent(project.ai?.exemplars ?? [])) && (
               <p className="qb-warn" data-testid="quick-ai-warn">

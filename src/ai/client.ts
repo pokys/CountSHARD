@@ -5,7 +5,22 @@
  */
 import { CancelledError } from '../analysis/client';
 import type { AiModelSpec, AiWorkerRequest, AiWorkerResponse } from '../workers/aiProtocol';
-import { type AiAsset, GECO2_CACHE, type Geco2Size, AI_CACHE, aiAssets, aiDownloaded, deleteAi, deleteGeco2, downloadAi, geco2Assets, missingBytes } from './modelStore';
+import {
+  type AiAsset,
+  GECO2_CACHE,
+  type Geco2Size,
+  AI_CACHE,
+  PROFILES_CACHE,
+  aiAssets,
+  aiDownloaded,
+  deleteAi,
+  deleteGeco2,
+  deleteProfiles,
+  downloadAi,
+  geco2Assets,
+  missingBytes,
+  profilesAssets,
+} from './modelStore';
 import type { TilePlan } from './tiling';
 import {
   type AiModelChoice,
@@ -35,7 +50,7 @@ export interface AiStatus {
   /** Bytes the chosen model still needs. */
   missingBytes: number;
   /** Per model (offline menu). */
-  models: { loca: boolean; geco2_768: boolean; geco2_1024: boolean };
+  models: { loca: boolean; geco2_768: boolean; geco2_1024: boolean; profiles: boolean };
   downloading: { loaded: number; total: number } | null;
   /** Sessions created in the worker (for `readyModel`). */
   ready: boolean;
@@ -52,6 +67,16 @@ export interface EstimateOutput {
   /** Grid cell in scaled (model-input) pixels. */
   cell: number;
   total: number;
+  durationMs: number;
+  backend: 'webgpu' | 'wasm';
+}
+
+export interface ProfilesOutput {
+  /** x1, y1, x2, y2 in the pixels of the image sent. */
+  boxes: Float32Array;
+  scores: Float32Array;
+  classes: Uint8Array;
+  runs: number;
   durationMs: number;
   backend: 'webgpu' | 'wasm';
 }
@@ -73,6 +98,8 @@ export interface DetectOutput {
 const RUN_MARKER = 'countshard.ai.running';
 /** Set after a LOCA crash on WebGPU: later LOCA runs go straight to WASM on this device. */
 const FORCE_WASM = 'countshard.ai.forceWasm';
+/** Same for the steel-profile model. */
+const PROFILES_FORCE_WASM = 'countshard.ai.profiles.forceWasm';
 
 export interface AiCrashReport {
   backend: 'webgpu' | 'wasm';
@@ -106,6 +133,7 @@ export function takeAiCrashReport(): AiCrashReport | null {
     const r = JSON.parse(raw) as AiCrashReport;
     if (r.backend === 'webgpu') {
       if (r.model === 'geco2') setGeco2ForceWasm();
+      else if (r.model === 'profiles') storageSet(PROFILES_FORCE_WASM, '1');
       else storageSet(FORCE_WASM, '1');
     }
     aiClient.noteCrash(r);
@@ -118,6 +146,7 @@ export function takeAiCrashReport(): AiCrashReport | null {
 type Pending = { resolve: (v: AiWorkerResponse) => void; reject: (e: Error) => void; onProgress?: (f: number) => void };
 
 function assetsFor(model: ResolvedModel, plan: Geco2Plan | null): { assets: AiAsset[]; cache: string } {
+  if (model === 'profiles') return { assets: profilesAssets(), cache: PROFILES_CACHE };
   return model === 'loca' ? { assets: aiAssets(), cache: AI_CACHE } : { assets: geco2Assets(plan?.size ?? 768), cache: GECO2_CACHE };
 }
 
@@ -125,6 +154,10 @@ function specFor(model: ResolvedModel, size: Geco2Size): AiModelSpec {
   if (model === 'loca') {
     const a = Object.fromEntries(aiAssets().map((x) => [x.key, x.url])) as Record<'features' | 'head' | 'wasm', string>;
     return { model: 'loca', urls: a };
+  }
+  if (model === 'profiles') {
+    const p = Object.fromEntries(profilesAssets().map((x) => [x.key, x.url])) as Record<'model' | 'wasm', string>;
+    return { model: 'profiles', urls: p };
   }
   const a = Object.fromEntries(geco2Assets(size).map((x) => [x.key, x.url])) as Record<'backbone' | 'exemplars' | 'head' | 'wasm', string>;
   return { model: 'geco2', size, urls: a };
@@ -144,7 +177,7 @@ class AiClient {
     profile: null,
     downloaded: false,
     missingBytes: 0,
-    models: { loca: false, geco2_768: false, geco2_1024: false },
+    models: { loca: false, geco2_768: false, geco2_1024: false, profiles: false },
     downloading: null,
     ready: false,
     readyModel: null,
@@ -184,17 +217,18 @@ class AiClient {
     } catch {
       /* keep the previous profile */
     }
-    const decision = profile ? resolveModel(choice, profile) : { model: choice === 'geco2' ? 'geco2' : 'loca', reason: null } as ModelDecision;
+    const decision = profile ? resolveModel(choice, profile) : ({ model: choice === 'auto' ? 'loca' : choice, reason: null } as ModelDecision);
     const plan = profile ? geco2Plan(profile) : null;
     const { assets } = assetsFor(decision.model, plan);
-    const [downloaded, missing, loca, g768, g1024] = await Promise.all([
+    const [downloaded, missing, loca, g768, g1024, prof] = await Promise.all([
       aiDownloaded(assets),
       missingBytes(assets),
       aiDownloaded(aiAssets()),
       aiDownloaded(geco2Assets(768)),
       aiDownloaded(geco2Assets(1024)),
+      aiDownloaded(profilesAssets()),
     ]);
-    this.set({ choice, profile, decision, geco2: plan, downloaded, missingBytes: missing, models: { loca, geco2_768: g768, geco2_1024: g1024 } });
+    this.set({ choice, profile, decision, geco2: plan, downloaded, missingBytes: missing, models: { loca, geco2_768: g768, geco2_1024: g1024, profiles: prof } });
     return this.status;
   }
 
@@ -215,9 +249,10 @@ class AiClient {
   }
 
   /** Deletes one model's files (offline menu / AI panel). */
-  async deleteModel(which: 'loca' | 'geco2_768' | 'geco2_1024'): Promise<void> {
+  async deleteModel(which: 'loca' | 'geco2_768' | 'geco2_1024' | 'profiles'): Promise<void> {
     this.cancel();
     if (which === 'loca') await deleteAi();
+    else if (which === 'profiles') await deleteProfiles();
     else await deleteGeco2(which === 'geco2_768' ? 768 : 1024);
     await this.refresh();
   }
@@ -271,7 +306,13 @@ class AiClient {
     if (this.loading && this.loadingKey !== key) this.loading = null;
     this.loadingKey = key;
     this.loading ??= (async () => {
-      const preferGpu = forceWasm ? false : model === 'loca' ? storageGet(FORCE_WASM) !== '1' : this.status.geco2?.backend === 'webgpu';
+      const preferGpu = forceWasm
+        ? false
+        : model === 'loca'
+          ? storageGet(FORCE_WASM) !== '1'
+          : model === 'profiles'
+            ? storageGet(PROFILES_FORCE_WASM) !== '1' && !this.status.profile?.mobile
+            : this.status.geco2?.backend === 'webgpu';
       const res = await this.send({ type: 'load', id: ++this.seq, spec: specFor(model, size), preferGpu });
       if (res.type !== 'ready') throw new Error('Unexpected AI worker response');
       this.set({ ready: true, readyModel: model, backend: res.backend });
@@ -346,6 +387,39 @@ class AiClient {
       const out = await this.detectOnce(scaled, boxes, onProgress);
       void this.refresh();
       return out;
+    }
+  }
+
+  private async profilesOnce(img: ImageData, onProgress?: (f: number) => void): Promise<ProfilesOutput> {
+    const buf = img.data.buffer.slice(0) as ArrayBuffer;
+    this.mark('profiles');
+    try {
+      const res = await this.send({ type: 'profiles', id: ++this.seq, rgba: buf, width: img.width, height: img.height }, [buf], onProgress);
+      if (res.type !== 'detections' || !res.classes) throw new Error('Unexpected AI worker response');
+      return {
+        boxes: new Float32Array(res.boxes),
+        scores: new Float32Array(res.scores),
+        classes: new Uint8Array(res.classes),
+        runs: res.runs ?? 1,
+        durationMs: res.durationMs,
+        backend: res.backend,
+      };
+    } finally {
+      storageSet(RUN_MARKER, null);
+    }
+  }
+
+  /** Steel profiles: detects and classifies the items; a WebGPU failure is retried once on WASM. */
+  async profiles(img: ImageData, onProgress?: (f: number) => void, onFallback?: () => void): Promise<ProfilesOutput> {
+    try {
+      return await this.profilesOnce(img, onProgress);
+    } catch (e) {
+      if (e instanceof CancelledError || this.status.backend !== 'webgpu') throw e;
+      storageSet(PROFILES_FORCE_WASM, '1');
+      this.reset();
+      onFallback?.();
+      await this.load(true);
+      return this.profilesOnce(img, onProgress);
     }
   }
 

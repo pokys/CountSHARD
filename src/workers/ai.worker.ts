@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 /**
  * Mode B worker: owns onnxruntime-web and the sessions of ONE model at a time (LOCA: two graphs;
- * GeCo2: three). Loading another model releases the previous sessions first (phones cannot hold
+ * GeCo2: three; steel profiles: one). Loading another model releases the previous sessions first (phones cannot hold
  * both). Model files and the WASM runtime are read from Cache Storage (downloaded on demand),
  * so this works offline. Cancellation = the client terminates the worker.
  */
@@ -9,6 +9,7 @@ import * as ort from 'onnxruntime-web';
 import { readCached } from '../ai/modelStore';
 import { type LocaBackend, runPlan } from '../ai/runner';
 import { type Geco2Size, geco2Detect, geco2Input } from '../ai/geco2';
+import { YOLO_SIZE, yoloDetect } from '../ai/yolo';
 import type { AiModelSpec, AiWorkerRequest, AiWorkerResponse } from './aiProtocol';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -16,7 +17,8 @@ declare const self: DedicatedWorkerGlobalScope;
 type Backend = 'webgpu' | 'wasm';
 type Loaded =
   | { model: 'loca'; key: string; features: ort.InferenceSession; head: ort.InferenceSession; backend: Backend }
-  | { model: 'geco2'; key: string; size: Geco2Size; backbone: ort.InferenceSession; exemplars: ort.InferenceSession; head: ort.InferenceSession; backend: Backend };
+  | { model: 'geco2'; key: string; size: Geco2Size; backbone: ort.InferenceSession; exemplars: ort.InferenceSession; head: ort.InferenceSession; backend: Backend }
+  | { model: 'profiles'; key: string; net: ort.InferenceSession; backend: Backend };
 
 let loaded: Loaded | null = null;
 
@@ -33,7 +35,7 @@ async function release() {
   if (!loaded) return;
   const l = loaded;
   loaded = null;
-  const all = l.model === 'loca' ? [l.features, l.head] : [l.backbone, l.exemplars, l.head];
+  const all = l.model === 'loca' ? [l.features, l.head] : l.model === 'profiles' ? [l.net] : [l.backbone, l.exemplars, l.head];
   for (const s of all) await s.release().catch(() => undefined);
 }
 
@@ -47,7 +49,7 @@ async function gpuAvailable(): Promise<boolean> {
 }
 
 async function load(spec: AiModelSpec, preferGpu: boolean): Promise<Loaded> {
-  const key = spec.model === 'loca' ? 'loca' : `geco2-${spec.size}`;
+  const key = spec.model === 'geco2' ? `geco2-${spec.size}` : spec.model;
   if (loaded && loaded.key === key) return loaded;
   await release();
   ort.env.wasm.wasmBinary = await readCached(spec.urls.wasm);
@@ -58,6 +60,23 @@ async function load(spec: AiModelSpec, preferGpu: boolean): Promise<Loaded> {
   if (spec.model === 'loca') {
     const [features, head] = await Promise.all([readCached(spec.urls.features), readCached(spec.urls.head)]);
     const make = async (b: Backend): Promise<Loaded> => ({ model: 'loca', key, features: await create(features, b), head: await create(head, b), backend: b });
+    try {
+      loaded = await make(ep);
+    } catch (e) {
+      if (ep !== 'webgpu') throw e;
+      loaded = await make('wasm');
+    }
+    return loaded;
+  }
+  if (spec.model === 'profiles') {
+    const file = await readCached(spec.urls.model);
+    // Small fp32 graph: default graph optimisation (no int8 weights to fold).
+    const make = async (b: Backend): Promise<Loaded> => ({
+      model: 'profiles',
+      key,
+      net: await ort.InferenceSession.create(new Uint8Array(file), { executionProviders: [b] }),
+      backend: b,
+    });
     try {
       loaded = await make(ep);
     } catch (e) {
@@ -126,6 +145,24 @@ async function detect(s: Extract<Loaded, { model: 'geco2' }>, req: Extract<AiWor
   return geco2Detect(obj, ltrb, gw!, gh!, S, { w: req.width, h: req.height });
 }
 
+async function profiles(s: Extract<Loaded, { model: 'profiles' }>, req: Extract<AiWorkerRequest, { type: 'profiles' }>, progress: (f: number) => void) {
+  const img = { data: new Uint8ClampedArray(req.rgba), width: req.width, height: req.height };
+  const input = s.net.inputNames[0]!;
+  const output = s.net.outputNames[0]!;
+  return yoloDetect(
+    img,
+    async (x) => {
+      const o = await s.net.run({ [input]: new ort.Tensor('float32', x, [1, 3, YOLO_SIZE, YOLO_SIZE]) });
+      const t = o[output]!;
+      const [, c, n] = t.dims as number[];
+      const data = (await t.getData()) as Float32Array;
+      t.dispose();
+      return { data, nc: c! - 4, n: n! };
+    },
+    progress,
+  );
+}
+
 self.onmessage = async (e: MessageEvent<AiWorkerRequest>) => {
   const req = e.data;
   try {
@@ -155,6 +192,14 @@ self.onmessage = async (e: MessageEvent<AiWorkerRequest>) => {
         { type: 'detections', id: req.id, boxes: d.boxes.buffer as ArrayBuffer, scores: d.scores.buffer as ArrayBuffer, durationMs: performance.now() - t0, backend: loaded.backend },
         [d.boxes.buffer as ArrayBuffer, d.scores.buffer as ArrayBuffer],
       );
+      return;
+    }
+    if (req.type === 'profiles') {
+      if (!loaded || loaded.model !== 'profiles') throw new Error('model not loaded');
+      const t0 = performance.now();
+      const d = await profiles(loaded, req, (f) => post({ type: 'progress', id: req.id, fraction: f }));
+      const bufs = [d.boxes.buffer, d.scores.buffer, d.classes.buffer] as ArrayBuffer[];
+      post({ type: 'detections', id: req.id, boxes: bufs[0]!, scores: bufs[1]!, classes: bufs[2]!, runs: d.runs, durationMs: performance.now() - t0, backend: loaded.backend }, bufs);
     }
   } catch (err) {
     post({ type: 'error', id: req.id, message: err instanceof Error ? err.message : String(err) });

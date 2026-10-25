@@ -4,7 +4,7 @@ import { checkOffline, isFullyOffline, type OfflineStatus } from '../pwa/offline
 import { registerServiceWorker } from '../pwa/register';
 import { iosBrowserTab, refreshApp, wipeEverything } from '../pwa/maintenance';
 import { type AiStatus, aiClient } from '../ai/client';
-import { aiAssets, geco2Assets, modelBytes } from '../ai/modelStore';
+import { aiAssets, geco2Assets, modelBytes, profilesAssets } from '../ai/modelStore';
 
 export function OfflineBadge({ engineLoaded }: { engineLoaded: boolean }) {
   const { t, fmt } = useI18n();
@@ -66,12 +66,12 @@ export function OfflineBadge({ engineLoaded }: { engineLoaded: boolean }) {
             <Item ok={ai.downloaded}>{ai.downloaded ? t.offline_ai_downloaded : t.offline_ai_not_downloaded}</Item>
             <Item ok={ai.ready}>
               {t.offline_ai_ready}
-              {ai.ready && ai.readyModel ? ` (${ai.readyModel === 'geco2' ? 'GeCo2' : 'LOCA'}, ${ai.backend === 'webgpu' ? 'WebGPU' : 'WASM'})` : ''}
+              {ai.ready && ai.readyModel ? ` (${ai.readyModel === 'geco2' ? 'GeCo2' : ai.readyModel === 'profiles' ? t.ai_model_profiles_short : 'LOCA'}, ${ai.backend === 'webgpu' ? 'WebGPU' : 'WASM'})` : ''}
             </Item>
             <Item ok={status.persisted}>{t.offline_persist}</Item>
           </ul>
           <h4 className="small">{t.offline_ai_models}</h4>
-          {!ai.models.loca && !ai.models.geco2_768 && !ai.models.geco2_1024 ? (
+          {!ai.models.loca && !ai.models.geco2_768 && !ai.models.geco2_1024 && !ai.models.profiles ? (
             <p className="muted tiny">{t.offline_model_none}</p>
           ) : (
             <ul className="checklist" data-testid="offline-models">
@@ -80,6 +80,7 @@ export function OfflineBadge({ engineLoaded }: { engineLoaded: boolean }) {
                   ['loca', ai.models.loca, t.offline_model_loca(mb(modelBytes(aiAssets())))],
                   ['geco2_768', ai.models.geco2_768, t.offline_model_geco2(768, mb(modelBytes(geco2Assets(768))))],
                   ['geco2_1024', ai.models.geco2_1024, t.offline_model_geco2(1024, mb(modelBytes(geco2Assets(1024))))],
+                  ['profiles', ai.models.profiles, t.offline_model_profiles(mb(modelBytes(profilesAssets())))],
                 ] as const
               )
                 .filter(([, ok]) => ok)

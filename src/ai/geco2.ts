@@ -211,14 +211,43 @@ export function exemplarFit(exemplars: Pick<AiBox, 'w' | 'h'>[], detections: AiD
 }
 
 /** Model-pixel detections → project-pixel automatic detections. */
-export function toProjectDetections(d: Geco2Detections, scale: number): AiDetection[] {
+export function toProjectDetections(d: Geco2Detections & { classes?: ArrayLike<number> }, scale: number): AiDetection[] {
   const out: AiDetection[] = [];
   for (let i = 0; i < d.scores.length; i++) {
     const [x1, y1, x2, y2] = [d.boxes[4 * i]! / scale, d.boxes[4 * i + 1]! / scale, d.boxes[4 * i + 2]! / scale, d.boxes[4 * i + 3]! / scale];
     if (x2 - x1 < 1 || y2 - y1 < 1) continue;
-    out.push({ id: detId(), x: x1, y: y1, w: x2 - x1, h: y2 - y1, score: d.scores[i]!, source: 'auto', review: 'unreviewed' });
+    const det: AiDetection = { id: detId(), x: x1, y: y1, w: x2 - x1, h: y2 - y1, score: d.scores[i]!, source: 'auto', review: 'unreviewed' };
+    if (d.classes) det.cls = d.classes[i]!;
+    out.push(det);
   }
   return out;
+}
+
+/** Class of the nearest classified detection (for a tap-added item); undefined when none has one. */
+export function detectionClassAt(list: AiDetection[], x: number, y: number): number | undefined {
+  let best: AiDetection | undefined;
+  let bd = Infinity;
+  for (const d of list) {
+    if (d.cls === undefined || d.review === 'rejected') continue;
+    const dist = Math.hypot(d.x + d.w / 2 - x, d.y + d.h / 2 - y);
+    if (dist < bd) {
+      bd = dist;
+      best = d;
+    }
+  }
+  return best?.cls;
+}
+
+/** Ids of classified detections per class index (classes in first-seen order). */
+export function classGroups(list: Pick<AiDetection, 'id' | 'cls'>[]): Map<number, string[]> {
+  const m = new Map<number, string[]>();
+  for (const d of list) {
+    if (d.cls === undefined) continue;
+    const ids = m.get(d.cls) ?? [];
+    ids.push(d.id);
+    m.set(d.cls, ids);
+  }
+  return m;
 }
 
 /**
@@ -233,8 +262,10 @@ export function mergeAiDetections(old: AiDetection[], fresh: AiDetection[]): AiD
   return [...kept, ...fresh.filter((f) => !kept.some((k) => close(k, f)))];
 }
 
-export function newManualDetection(x: number, y: number, w: number, h: number): AiDetection {
-  return { id: detId(), x: x - w / 2, y: y - h / 2, w, h, source: 'manual', review: 'confirmed' };
+export function newManualDetection(x: number, y: number, w: number, h: number, cls?: number): AiDetection {
+  const d: AiDetection = { id: detId(), x: x - w / 2, y: y - h / 2, w, h, source: 'manual', review: 'confirmed' };
+  if (cls !== undefined) d.cls = cls;
+  return d;
 }
 
 /**

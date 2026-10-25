@@ -12,10 +12,10 @@ export const AI_CACHE = 'countshard-ai-v2';
 export const AI_MODEL_ID = 'LOCA few-shot (Đukić et al., ICCV 2023), int8 weight-only ONNX export v2 (chunked attention)';
 export const ORT_VERSION = '1.30.0';
 
-export type AiModelId = 'loca' | 'geco2';
+export type AiModelId = 'loca' | 'geco2' | 'profiles';
 
 export interface AiAsset {
-  key: 'features' | 'head' | 'wasm' | 'backbone' | 'exemplars';
+  key: 'features' | 'head' | 'wasm' | 'backbone' | 'exemplars' | 'model';
   url: string;
   bytes: number;
   /** SHA-256 (hex) for the model files; the WASM runtime is checked by size. */
@@ -78,6 +78,24 @@ export function geco2Assets(size: Geco2Size, base: string = document.baseURI): A
   ];
 }
 
+// --- Steel profiles (YOLOv8n) ------------------------------------------------------------
+
+/** Pretrained steel-profile detector, fp32 ONNX export (no example boxes needed). */
+export const PROFILES_CACHE = 'countshard-profiles-v1';
+export const PROFILES_MODEL_ID = 'Steel profiles YOLOv8n (IvanFenster/PipesCounting), ONNX export, 640 px input';
+
+export function profilesAssets(base: string = document.baseURI): AiAsset[] {
+  return [
+    {
+      key: 'model',
+      url: new URL('models/profiles/steel-profiles-yolov8n.onnx', base).href,
+      bytes: 12268077,
+      sha256: 'c016f91328dc54f786ea8496f411188d41cb6ee89c54dc9ca27a67fe91d93d5c',
+    },
+    { key: 'wasm', url: new URL(ortWasmUrl, base).href, bytes: 28312028 },
+  ];
+}
+
 /** Model files only (without the shared runtime), e.g. for the size shown in the offline menu. */
 export function modelBytes(assets: AiAsset[]): number {
   return assets.filter((a) => a.key !== 'wasm').reduce((a, b) => a + b.bytes, 0);
@@ -90,7 +108,12 @@ export function totalBytes(assets = aiAssets()): number {
 /** Removes caches of earlier model versions (the file URLs stay the same, the content changed). */
 async function dropOldCaches() {
   for (const k of await caches.keys()) {
-    if ((k.startsWith('countshard-ai-') && k !== AI_CACHE) || (k.startsWith('countshard-geco2-') && k !== GECO2_CACHE)) await caches.delete(k);
+    if (
+      (k.startsWith('countshard-ai-') && k !== AI_CACHE) ||
+      (k.startsWith('countshard-geco2-') && k !== GECO2_CACHE) ||
+      (k.startsWith('countshard-profiles-') && k !== PROFILES_CACHE)
+    )
+      await caches.delete(k);
   }
 }
 
@@ -180,20 +203,37 @@ export async function downloadAi(onProgress?: (loaded: number, total: number) =>
  * that cache is deleted, the runtime moves to the other model's cache if that model still has
  * its files (so deleting one model never breaks the other).
  */
-async function keepRuntimeFor(fromCache: string, toCache: string, otherModelFiles: AiAsset[]) {
+async function keepRuntimeFor(fromCache: string, toCache: string, otherModelFiles: AiAsset[]): Promise<boolean> {
   const wasm = aiAssets().find((a) => a.key === 'wasm')!;
   const from = await caches.open(fromCache);
   const r = await from.match(wasm.url);
-  if (!r) return;
+  if (!r) return false;
   const to = await caches.open(toCache);
-  for (const a of otherModelFiles) if (a.key !== 'wasm' && !(await to.match(a.url))) return;
+  for (const a of otherModelFiles) if (a.key !== 'wasm' && !(await to.match(a.url))) return false;
   await to.put(wasm.url, r);
+  return true;
+}
+
+/** Moves the runtime out of `fromCache` to the first other model that still has its files. */
+async function keepRuntime(fromCache: string) {
+  const others: [string, AiAsset[]][] = [
+    [AI_CACHE, aiAssets()],
+    ...GECO2_SIZES.map((s): [string, AiAsset[]] => [GECO2_CACHE, geco2Assets(s)]),
+    [PROFILES_CACHE, profilesAssets()],
+  ];
+  for (const [cache, files] of others) if (cache !== fromCache && (await keepRuntimeFor(fromCache, cache, files))) return;
 }
 
 export async function deleteAi(): Promise<void> {
   if (!('caches' in self)) return;
-  for (const s of GECO2_SIZES) await keepRuntimeFor(AI_CACHE, GECO2_CACHE, geco2Assets(s));
+  await keepRuntime(AI_CACHE);
   await caches.delete(AI_CACHE);
+}
+
+export async function deleteProfiles(): Promise<void> {
+  if (!('caches' in self)) return;
+  await keepRuntime(PROFILES_CACHE);
+  await caches.delete(PROFILES_CACHE);
 }
 
 /** Deletes one GeCo2 input size; the whole GeCo2 cache (incl. its copy of the runtime) when none is left. */
@@ -205,7 +245,7 @@ export async function deleteGeco2(size: Geco2Size): Promise<void> {
   let left = false;
   for (const s of others) for (const a of geco2Assets(s)) if (a.key !== 'wasm' && (await cache.match(a.url))) left = true;
   if (!left) {
-    await keepRuntimeFor(GECO2_CACHE, AI_CACHE, aiAssets());
+    await keepRuntime(GECO2_CACHE);
     await caches.delete(GECO2_CACHE);
   }
 }

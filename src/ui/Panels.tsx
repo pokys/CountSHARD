@@ -518,6 +518,7 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
         headers: t.csv_det,
         sourceLabels: { auto: t.source_auto, manual: t.source_manual },
         reviewLabels: { unreviewed: t.review_unreviewed, confirmed: t.review_confirmed },
+        classLabels: t.ai_profiles_classes,
       });
       downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${base}-${t.ai_det_qb}.csv`);
       return;

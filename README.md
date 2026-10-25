@@ -54,6 +54,11 @@ the browser.*
   the graphics card on computers (≈ 6 s per photo) and on the processor on phones (iPhone
   ≈ 16 s, Galaxy A34 ≈ 1 min); its files are served from a separate site
   (<https://pokys.github.io/geco2-bench/>), not from this repository.
+  A third choice, **Ocelové profily** (steel profiles), needs no examples: a trained YOLOv8n
+  detector (model from [IvanFenster/PipesCounting](https://github.com/IvanFenster/PipesCounting),
+  ≈ 12 MB, `public/models/profiles/`) finds the ends of round pipes, square tubes, U channels and
+  L angles and puts each type in its own group (≈ 1 s per photo on a computer; large photos with
+  small items are split into overlapping tiles).
 
 Not yet: Live Scan, PDF reports — see [docs/roadmap.md](docs/roadmap.md).
 

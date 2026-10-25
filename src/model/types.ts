@@ -178,6 +178,8 @@ export interface AiDensityResult {
 export interface AiDetection extends AiBox {
   /** Objectness score of the model (not a probability). Absent for manual ones. */
   score?: number;
+  /** Class index of a multi-class model (steel profiles: see AiDetectionResult.classes). */
+  cls?: number;
   source: DetectionSource;
   review: ReviewState;
 }
@@ -195,6 +197,8 @@ export interface AiDetectionResult {
   /** Model-input pixels per project pixel. */
   scale: number;
   objects: AiDetection[];
+  /** Class names of a multi-class model, indexed by AiDetection.cls. */
+  classes?: string[];
   exemplarsUsed: AiBox[];
   inputExemplarIds: string[];
   durationMs: number;

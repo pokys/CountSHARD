@@ -326,7 +326,7 @@ export const en: typeof cs = {
   legend_det_footer: (date: string) => `Created ${date} with CountSHARD. Items found by the GeCo2 model, reviewed by hand.`,
   ai_det_qb: 'items-ai',
   csv_det: {
-    number: 'Number', x: 'Centre X (px)', y: 'Centre Y (px)', w: 'Width (px)', h: 'Height (px)', source: 'Source', review: 'Review', score: 'Model score', model: 'Model',
+    number: 'Number', x: 'Centre X (px)', y: 'Centre Y (px)', w: 'Width (px)', h: 'Height (px)', source: 'Source', review: 'Review', score: 'Model score', model: 'Model', type: 'Type',
   },
   task_exemplar: 'Draw a tight box around 1 item (1–3 examples).',
   view_menu: 'View',
@@ -344,4 +344,14 @@ export const en: typeof cs = {
   task_hint_region: 'Fix count: draw a box around a part you count yourself and enter its true count. There your count replaces the AI estimate.',
   region_ask: (model: string) => `The model estimates ≈ ${model} here. How many are there really?`,
   save: 'Save',
+  // steel-profile model
+  ai_model_profiles: 'Steel profiles – pipes, tubes, U, L (no examples)',
+  ai_model_profiles_short: 'Steel profiles',
+  ai_title_profiles: 'Steel profiles – AI',
+  ai_intro_profiles: 'A trained model finds the ends of round pipes, square tubes, U channels and L angles and groups them by type. No examples needed – just run it. Tap an item to remove it, tap an empty spot to add a missing one.',
+  ai_source_profiles: 'Model: IvanFenster/PipesCounting (YOLOv8n).',
+  ai_profiles_classes: ['Pipes', 'Square tubes', 'Angles', 'U channels'] as string[],
+  ai_profiles_unknown: 'Other',
+  ai_profiles_runs: (n: number) => (n > 1 ? `photo split into ${n - 1} tiles` : 'whole photo at once'),
+  offline_model_profiles: (mb: string) => `Steel profiles (${mb})`,
 };

@@ -336,7 +336,7 @@ export const cs = {
   legend_det_footer: (date: string) => `Vytvořeno ${date} v aplikaci CountSHARD. Kusy nalezené modelem GeCo2 s ruční kontrolou.`,
   ai_det_qb: 'kusy-ai',
   csv_det: {
-    number: 'Číslo', x: 'X středu (px)', y: 'Y středu (px)', w: 'Šířka (px)', h: 'Výška (px)', source: 'Zdroj', review: 'Kontrola', score: 'Skóre modelu', model: 'Model',
+    number: 'Číslo', x: 'X středu (px)', y: 'Y středu (px)', w: 'Šířka (px)', h: 'Výška (px)', source: 'Zdroj', review: 'Kontrola', score: 'Skóre modelu', model: 'Model', type: 'Druh',
   },
   // layout: photo + floating tools + sheet
   task_exemplar: 'Těsně ohraničte 1 kus (1–3 vzory).',
@@ -355,4 +355,14 @@ export const cs = {
   task_hint_region: 'Opravit počet: ohraničte část snímku, kterou spočítáte sami, a zadejte její skutečný počet. V té části pak platí váš počet místo odhadu AI.',
   region_ask: (model: string) => `Model zde odhaduje ≈ ${model}. Kolik kusů tu skutečně je?`,
   save: 'Uložit',
+  // steel-profile model
+  ai_model_profiles: 'Ocelové profily – trubky, jekly, U, L (bez vzorů)',
+  ai_model_profiles_short: 'Ocelové profily',
+  ai_title_profiles: 'Ocelové profily – AI',
+  ai_intro_profiles: 'Natrénovaný model najde čela trubek, jeklů, U profilů a úhelníků a rozdělí je podle druhu. Vzory nejsou potřeba – stačí spustit. Klepnutím na kus ho odeberete, klepnutím na prázdné místo přidáte chybějící.',
+  ai_source_profiles: 'Model: IvanFenster/PipesCounting (YOLOv8n).',
+  ai_profiles_classes: ['Trubky', 'Jekly', 'Úhelníky', 'U profily'] as string[],
+  ai_profiles_unknown: 'Ostatní',
+  ai_profiles_runs: (n: number) => (n > 1 ? `snímek rozdělen na ${n - 1} dílů` : 'celý snímek najednou'),
+  offline_model_profiles: (mb: string) => `Ocelové profily (${mb})`,
 };

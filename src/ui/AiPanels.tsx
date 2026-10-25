@@ -22,8 +22,14 @@ export function AiDetectionResultPanel({ project, count }: { project: Project; c
   if (!isDetectionResult(res)) return null;
   const inArea = res.objects.filter((d) => inCountArea(project.countArea, d.x + d.w / 2, d.y + d.h / 2));
   const counted = inArea.filter((d) => d.review !== 'rejected');
-  const small = geco2ExemplarSide(res.exemplarsUsed, res.scale) < GECO2_MIN_EXEMPLAR_PX;
-  const fit = exemplarFit(res.exemplarsUsed, res.objects);
+  const profiles = !!res.classes;
+  const small = !profiles && geco2ExemplarSide(res.exemplarsUsed, res.scale) < GECO2_MIN_EXEMPLAR_PX;
+  const fit = profiles ? null : exemplarFit(res.exemplarsUsed, res.objects);
+  const perClass = profiles
+    ? t.ai_profiles_classes
+        .map((name, c) => ({ name, n: counted.filter((d) => d.cls === c).length }))
+        .filter((x) => x.n > 0)
+    : [];
   return (
     <section className="card result" aria-live="polite">
       <div className="total">
@@ -36,7 +42,12 @@ export function AiDetectionResultPanel({ project, count }: { project: Project; c
       <p className="small">
         {t.ai_det_counts(counted.filter((d) => d.source === 'auto').length, counted.filter((d) => d.source === 'manual').length, inArea.filter((d) => d.review === 'rejected').length)}
       </p>
-      {project.ai && resultIsStale(project.ai) && <p className="small warn">{t.ai_stale}</p>}
+      {perClass.length > 0 && (
+        <p className="small" data-testid="ai-profiles-classes">
+          {perClass.map((x) => `${x.name}: ${x.n}`).join(' · ')}
+        </p>
+      )}
+      {!profiles && project.ai && resultIsStale(project.ai) && <p className="small warn">{t.ai_stale}</p>}
       {small && <p className="small warn">{t.ai_det_small}</p>}
       {fit !== null && fit > EXEMPLAR_FIT_BIG && (
         <p className="small warn" data-testid="ai-fit-warn">
@@ -130,6 +141,8 @@ export function AiPanel({
   useEffect(() => setCount(pending?.model !== null && pending?.model !== undefined ? String(roundEstimate(pending.model)) : ''), [pending]);
   const countVal = Number(count);
   const geco2 = status.decision?.model === 'geco2';
+  const profiles = status.decision?.model === 'profiles';
+  const modelName = (m: string | undefined) => (m === 'geco2' ? 'GeCo2' : m === 'profiles' ? t.ai_model_profiles_short : 'LOCA');
   const plan = status.geco2;
   const backendName = (b: 'webgpu' | 'wasm') => (b === 'webgpu' ? 'WebGPU' : 'WASM');
   const sec = (s: number | null | undefined) => fmt(s ?? 0, 0);
@@ -149,8 +162,8 @@ export function AiPanel({
 
   return (
     <section className="card">
-      <h2>{geco2 ? t.ai_title_geco2 : t.ai_title}</h2>
-      <p className="muted small">{geco2 ? t.ai_intro_geco2 : t.ai_intro}</p>
+      <h2>{profiles ? t.ai_title_profiles : geco2 ? t.ai_title_geco2 : t.ai_title}</h2>
+      <p className="muted small">{profiles ? t.ai_intro_profiles : geco2 ? t.ai_intro_geco2 : t.ai_intro}</p>
 
       {status.crash?.model === 'geco2' && (
         <div className="banner warn small" data-testid="ai-crash-geco2">
@@ -177,7 +190,7 @@ export function AiPanel({
       {/* One line by default (the automatic choice usually fits); the choice opens on tap. */}
       <details className="model-pick">
         <summary className="small" data-testid="ai-model-summary">
-          {t.ai_model_line(status.choice === 'auto' ? t.ai_model_auto : status.choice === 'loca' ? 'LOCA' : 'GeCo2', geco2 ? 'GeCo2' : 'LOCA', status.choice === 'auto')}
+          {t.ai_model_line(status.choice === 'auto' ? t.ai_model_auto : modelName(status.choice), modelName(status.decision?.model), status.choice === 'auto')}
         </summary>
         <label className="stack">
           <span className="small">{t.ai_model_label}</span>
@@ -185,6 +198,7 @@ export function AiPanel({
             <option value="auto">{t.ai_model_auto}</option>
             <option value="loca">{t.ai_model_loca}</option>
             <option value="geco2">{t.ai_model_geco2}</option>
+            <option value="profiles">{t.ai_model_profiles}</option>
           </select>
         </label>
         {status.choice === 'auto' && !status.decision && <p className="muted tiny">{t.ai_auto_checking}</p>}
@@ -211,8 +225,8 @@ export function AiPanel({
         </div>
       )}
 
-      <h3 className="small">{t.ai_step_exemplars}</h3>
-      {exemplars.length === 0 ? (
+      {!profiles && <h3 className="small">{t.ai_step_exemplars}</h3>}
+      {profiles ? null : exemplars.length === 0 ? (
         <p className="muted small">{t.ai_tool_exemplar_hint}</p>
       ) : (
         <ol className="ms-list small">
@@ -226,16 +240,16 @@ export function AiPanel({
           ))}
         </ol>
       )}
-      {exemplarsTooDifferent(exemplars) && (
+      {!profiles && exemplarsTooDifferent(exemplars) && (
         <p className="small warn" data-testid="ai-warn-sizes">
           {t.ai_warn_sizes(fmt(exemplarSizeRatio(exemplars), 1))}
         </p>
       )}
-      <button className="btn primary" disabled={running || !status.downloaded || exemplars.length === 0} onClick={onRun} data-testid="ai-run">
-        {geco2 ? (isDetectionResult(ai?.result) ? t.ai_rerun_detect : t.ai_run_detect) : densityResult ? t.ai_rerun : t.ai_run}
+      <button className="btn primary" disabled={running || !status.downloaded || (!profiles && exemplars.length === 0)} onClick={onRun} data-testid="ai-run">
+        {geco2 || profiles ? (isDetectionResult(ai?.result) ? t.ai_rerun_detect : t.ai_run_detect) : densityResult ? t.ai_rerun : t.ai_run}
       </button>
-      {status.downloaded && exemplars.length === 0 && <p className="muted tiny">{t.ai_need_exemplar}</p>}
-      {!geco2 && status.backend === 'wasm' && <p className="muted tiny">{t.ai_time_hint}</p>}
+      {!profiles && status.downloaded && exemplars.length === 0 && <p className="muted tiny">{t.ai_need_exemplar}</p>}
+      {!geco2 && !profiles && status.backend === 'wasm' && <p className="muted tiny">{t.ai_time_hint}</p>}
 
       {densityResult && ai && (
         <>
@@ -288,7 +302,7 @@ export function AiPanel({
         </>
       )}
 
-      <p className="muted tiny">{geco2 ? t.ai_licence_geco2 : t.ai_licence}</p>
+      <p className="muted tiny">{profiles ? t.ai_source_profiles : geco2 ? t.ai_licence_geco2 : t.ai_licence}</p>
       {status.downloaded && !running && (
         <button className="btn ghost small" onClick={onDeleteModel}>
           {t.ai_delete}
