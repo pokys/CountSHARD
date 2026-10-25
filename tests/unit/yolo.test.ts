@@ -14,6 +14,8 @@ import {
   YOLO_SIZE,
   dropOversized,
   innerEdges,
+  minScoreFromSensitivity,
+  sensitivityFromMinScore,
   letterbox,
   tilePlan,
   yoloDecode,
@@ -21,7 +23,7 @@ import {
   yoloInput,
   yoloSuppress,
 } from '../../src/ai/yolo';
-import { classGrouping, classGroups, detectionClassAt, toProjectDetections } from '../../src/ai/geco2';
+import { classGrouping, classGroups, detectionClassAt, isUncertain, shownDetections, toProjectDetections } from '../../src/ai/geco2';
 import { autoProjectName, createProject, migrateMode, switchMode } from '../../src/state/project';
 import { detectionSummary, parseProjectFile, toAiDetectionsCsv, toProjectFile } from '../../src/io/serialize';
 
@@ -215,5 +217,23 @@ describe('project list count', () => {
     const q = { ...p, mode: 'profiles' as const, ai: { exemplars: [], corrections: [], result } };
     expect(projectTotal(q)).toEqual({ total: 2, estimate: false });
     expect(projectTotal({ ...q, mode: 'circles' })).toEqual({ total: null, estimate: false });
+  });
+});
+
+describe('steel-profile sensitivity and review', () => {
+  it('maps the slider to a score threshold and back, default 0.25', () => {
+    expect(minScoreFromSensitivity(70)).toBeCloseTo(0.25);
+    expect(minScoreFromSensitivity(0)).toBeCloseTo(0.6);
+    expect(minScoreFromSensitivity(100)).toBeCloseTo(0.1);
+    for (const s of [0, 20, 55, 70, 85, 100]) expect(sensitivityFromMinScore(minScoreFromSensitivity(s))).toBe(s);
+  });
+
+  it('hides unsure automatic items below the threshold but keeps the user’s ones', () => {
+    const d = toProjectDetections({ boxes: new Float32Array([0, 0, 10, 10, 20, 0, 30, 10, 40, 0, 50, 10]), scores: new Float32Array([0.9, 0.3, 0.15]), classes: new Uint8Array([0, 0, 0]) }, 1);
+    d[2] = { ...d[2]!, review: 'confirmed' };
+    expect(shownDetections({ objects: d, minScore: 0.25 }).map((x) => Math.round(x.score! * 100))).toEqual([90, 30, 15]);
+    expect(shownDetections({ objects: d, minScore: 0.5 }).map((x) => Math.round(x.score! * 100))).toEqual([90, 15]);
+    expect(shownDetections({ objects: d }).length).toBe(3);
+    expect(d.map(isUncertain)).toEqual([false, true, false]);
   });
 });

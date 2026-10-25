@@ -4,7 +4,7 @@
 import { type AiState, type Project, isCounted, isDetectionResult } from '../model/types';
 import { computeStats, numbering } from '../state/project';
 import { decodeDensity, summarize } from '../ai/estimate';
-import { asCountedObjects, countedDetections } from '../ai/geco2';
+import { asCountedObjects, countedDetections, shownDetections } from '../ai/geco2';
 
 export interface CsvOptions {
   /** Decimal separator; Czech Excel expects a comma. Field separator is then ';'. */
@@ -105,8 +105,8 @@ export function toAiDetectionsCsv(p: Project, o: AiDetectionCsvLabels): string {
   const typeName = (c: number | undefined) => (c === undefined ? '' : (o.classLabels?.[c] ?? (isDetectionResult(res) ? res.classes?.[c] : undefined) ?? String(c)));
   if (isDetectionResult(res)) {
     const area = p.countArea ?? null;
-    const numbers = numbering(asCountedObjects(res.objects), area);
-    countedDetections(res.objects, area)
+    const numbers = numbering(asCountedObjects(shownDetections(res)), area);
+    countedDetections(shownDetections(res), area)
       .sort((a, b) => numbers.get(a.id)! - numbers.get(b.id)!)
       .forEach((d) =>
         rows.push([
@@ -144,7 +144,7 @@ export interface DetectionFileSummary {
 export function detectionSummary(p: Project): DetectionFileSummary | null {
   const res = p.ai?.result;
   if (!isDetectionResult(res)) return null;
-  const c = countedDetections(res.objects, p.countArea ?? null);
+  const c = countedDetections(shownDetections(res), p.countArea ?? null);
   const out: DetectionFileSummary = { kind: 'detections', isEstimate: false, model: res.model, engine: res.engine, count: c.length, auto: c.filter((d) => d.source === 'auto').length, manual: c.filter((d) => d.source === 'manual').length };
   if (res.classes) {
     const by: Record<string, number> = {};

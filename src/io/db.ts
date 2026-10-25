@@ -4,7 +4,7 @@
  */
 import { type Project, isDetectionResult } from '../model/types';
 import { computeStats } from '../state/project';
-import { countedDetections } from '../ai/geco2';
+import { countedDetections, shownDetections } from '../ai/geco2';
 import { roundEstimate, summarize } from '../ai/estimate';
 
 const DB_NAME = 'countshard';
@@ -26,7 +26,7 @@ export function projectTotal(p: Project): { total: number | null; estimate: bool
   const area = p.countArea ?? null;
   if ((p.mode ?? 'circles') === 'circles') return { total: p.analysis || p.objects.length ? computeStats(p).total : null, estimate: false };
   const r = p.ai?.result;
-  if (isDetectionResult(r)) return { total: countedDetections(r.objects, area).length, estimate: false };
+  if (isDetectionResult(r)) return { total: countedDetections(shownDetections(r), area).length, estimate: false };
   const s = p.ai ? summarize(p.ai, area) : null;
   return s ? { total: roundEstimate(s.corrected), estimate: true } : { total: null, estimate: false };
 }

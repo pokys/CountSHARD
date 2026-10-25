@@ -357,6 +357,12 @@ export const cs = {
   region_ask: (model: string) => `Model zde odhaduje ≈ ${model}. Kolik kusů tu skutečně je?`,
   save: 'Uložit',
   // steel-profile model
+  ai_uncertain: (n: number) => `${n} ${n === 1 ? 'kus je nejistý' : n < 5 ? 'kusy jsou nejisté' : 'kusů je nejistých'} (žluté „?“) – zkontrolujte je. Podržením kusu ho potvrdíte nebo změníte druh.`,
+  ai_uncertain_short: (n: number) => `${n} nejist${n === 1 ? 'ý' : n < 5 ? 'é' : 'ých'} – zkontrolujte žluté „?“`,
+  det_sel_title: (n: number, what: string) => `Kus ${n}${what ? ` · ${what}` : ''}`,
+  det_sel_score: (s: string) => `jistota ${s}`,
+  det_sel_type: 'Druh',
+  profiles_sens_hint: 'Více = ukáže i kusy, kterými si model není jistý (označí je „?“). Méně = jen jisté kusy. Potvrzené a ručně přidané kusy zůstávají vždy.',
   name_button: 'Název',
   name_label: 'Název projektu',
   name_hint: 'Je v seznamu projektů, v názvu souborů a jako nadpis uloženého obrázku. Smazáním se vrátí automatický.',

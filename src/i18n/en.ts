@@ -346,6 +346,12 @@ export const en: typeof cs = {
   region_ask: (model: string) => `The model estimates ≈ ${model} here. How many are there really?`,
   save: 'Save',
   // steel-profile model
+  ai_uncertain: (n: number) => `${n} ${n === 1 ? 'item is' : 'items are'} uncertain (amber “?”) – please check. Long-press an item to confirm it or change its type.`,
+  ai_uncertain_short: (n: number) => `${n} uncertain – check the amber “?”`,
+  det_sel_title: (n: number, what: string) => `Item ${n}${what ? ` · ${what}` : ''}`,
+  det_sel_score: (s: string) => `confidence ${s}`,
+  det_sel_type: 'Type',
+  profiles_sens_hint: 'More = also shows items the model is unsure about (marked “?”). Less = only sure items. Confirmed and manually added items always stay.',
   name_button: 'Name',
   name_label: 'Project name',
   name_hint: 'Shown in the project list, used for file names and as the title of the saved image. Clear it to get the automatic name back.',

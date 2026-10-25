@@ -31,13 +31,15 @@ import { CalibrationPanel, ExportPanel, type ExtraPhoto, GroupsPanel, MultiShotP
 import { AiDetectionResultPanel, AiPanel, AiResultPanel, type PendingRegion } from './AiPanels';
 import { type AiStatus, aiClient } from '../ai/client';
 import { AI_MODEL_ID, AiDownloadError, ORT_VERSION, PROFILES_MODEL_ID, geco2ModelId } from '../ai/modelStore';
-import { YOLO_CLASSES, YOLO_SIZE } from '../ai/yolo';
+import { SCORE_MIN, YOLO_CLASSES, YOLO_SIZE, minScoreFromSensitivity, sensitivityFromMinScore } from '../ai/yolo';
 import {
   asCountedObjects,
   boxesOf,
   classGrouping,
   countedDetections,
   detectionClassAt,
+  isUncertain,
+  shownDetections,
   geco2Boxes,
   geco2ContentSize,
   geco2Scale,
@@ -89,6 +91,8 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const project = hist.present;
   const [tool, setTool] = useState<Tool>((session.project.mode ?? 'circles') !== 'circles' && !isDetectionResult(session.project.ai?.result) ? 'pan' : 'edit');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** AI modes: detection selected by a long press (confirm / change type / remove). */
+  const [selDetId, setSelDetId] = useState<string | null>(null);
   const [showOverlay, setShowOverlay] = useState(true);
   const [showNumbers, setShowNumbers] = useState(true);
   const [showRejected, setShowRejected] = useState(false);
@@ -326,11 +330,19 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   /** GeCo2 detections (null for a LOCA result). */
   const detResult = isDetectionResult(anyAiResult) ? anyAiResult : null;
   const heat = useMemo(() => (aiResult ? heatCanvas(aiResult) : null), [aiResult]);
-  const detObjects = useMemo(() => (detResult ? asCountedObjects(detResult.objects) : []), [detResult]);
+  /** Detections in play (the sensitivity slider hides unsure automatic ones). */
+  const detList = useMemo(() => (detResult ? shownDetections(detResult) : []), [detResult]);
+  const detObjects = useMemo(() => asCountedObjects(detList), [detList]);
+  /** Steel profiles: automatic items the model was unsure about. */
+  const detUncertain = useMemo(
+    () => (detResult?.classes ? new Set(countedDetections(detList, project.countArea ?? null).filter(isUncertain).map((d) => d.id)) : null),
+    [detResult, detList, project.countArea],
+  );
   const detShown = useMemo(() => detObjects.filter((o) => inCountArea(project.countArea, o.x, o.y)), [detObjects, project.countArea]);
+  const selDet = selDetId ? (detList.find((d) => d.id === selDetId && d.review !== 'rejected') ?? null) : null;
   const detNumbers = useMemo(() => numbering(detObjects, project.countArea ?? null), [detObjects, project.countArea]);
   const detBoxes = useMemo(() => (detResult ? boxesOf(detResult.objects) : null), [detResult]);
-  const detCount = useMemo(() => (detResult ? countedDetections(detResult.objects, project.countArea ?? null).length : 0), [detResult, project.countArea]);
+  const detCount = useMemo(() => (detResult ? countedDetections(detList, project.countArea ?? null).length : 0), [detResult, detList, project.countArea]);
   const aiModel = aiStatus.active;
   const [showHeat, setShowHeat] = useState(true);
 
@@ -450,6 +462,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             scale: sx,
             objects: mergeAiDetections(prev, fresh),
             classes: [...YOLO_CLASSES],
+            minScore: isDetectionResult(p.ai?.result) && p.ai!.result.modelId === 'profiles' ? (p.ai!.result.minScore ?? SCORE_MIN) : SCORE_MIN,
             exemplarsUsed: [],
             inputExemplarIds: [],
             durationMs: out.durationMs,
@@ -610,13 +623,13 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
       if (project.analysis || project.objects.length) what = t.name_what_pcs(t.name_round, stats.total);
     } else if (detResult?.classes) {
       const per = new Map<number, number>();
-      for (const d of countedDetections(detResult.objects, project.countArea ?? null)) if (d.cls !== undefined) per.set(d.cls, (per.get(d.cls) ?? 0) + 1);
+      for (const d of countedDetections(detList, project.countArea ?? null)) if (d.cls !== undefined) per.set(d.cls, (per.get(d.cls) ?? 0) + 1);
       const parts = [...per].sort((a, b) => b[1] - a[1]).map(([c, n]) => t.name_what_pcs(t.ai_profiles_classes[c] ?? t.ai_profiles_unknown, n));
       what = parts.length ? parts.join(', ') : t.name_what_pcs(t.name_what_none.profiles, 0);
     } else if (detResult) what = t.name_what_pcs(t.name_items, detCount);
     else if (aiResult && aiSummary) what = t.name_estimate(roundEstimate(aiSummary.corrected));
     return autoProjectName(what, project.createdAt);
-  }, [t, mode, project.analysis, project.objects.length, project.countArea, project.createdAt, stats.total, detResult, detCount, aiResult, aiSummary]);
+  }, [t, mode, project.analysis, project.objects.length, project.countArea, project.createdAt, stats.total, detResult, detList, detCount, aiResult, aiSummary]);
   useEffect(() => {
     if (!project.nameAuto || project.name === generatedName) return;
     setHist((h) => (h.present.nameAuto ? { ...h, present: { ...h.present, name: generatedName } } : h));
@@ -683,10 +696,11 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
       showToast(t.toast_added);
     },
     onRemove: (id: string) => {
+      if (id === selDetId) setSelDetId(null);
       editDetections((list) => removeAiDetection(list, id));
       showToast(t.toast_removed);
     },
-    onSelect: () => undefined,
+    onSelect: (id: string | null) => setSelDetId(id),
     onMove: () => undefined,
     onResize: () => undefined,
   };
@@ -931,12 +945,13 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             groups={aiMode ? detGrouping.groups : project.groups}
             area={project.countArea ?? null}
             numbers={showNumbers ? (aiMode ? detNumbers : numbers) : null}
-            selectedId={mode === 'circles' ? selectedId : null}
+            selectedId={mode === 'circles' ? selectedId : selDetId}
             tool={tool}
             showOverlay={showOverlay && !comparing}
             showRejected={showRejected}
             ai={aiOverlay}
             boxes={aiMode ? detBoxes : null}
+            uncertain={aiMode ? detUncertain : null}
             onDrawRect={onDrawRect}
             onDrawArea={onDrawArea}
             onSelectRegion={setSelectedRegionId}
@@ -1121,6 +1136,47 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             <span aria-hidden="true" />
           </button>
 
+          {selDet && aiMode && !progress && (
+            <div className="selbar" role="group" aria-label={t.selected} data-testid="det-selbar">
+              <span className="selbar-title">
+                {t.det_sel_title(detNumbers.get(selDet.id) ?? 0, selDet.cls !== undefined ? (t.ai_profiles_classes[selDet.cls] ?? '') : '')}
+                {selDet.score !== undefined && detResult?.classes && <span className="tiny muted"> · {t.det_sel_score(`${Math.round(selDet.score * 100)} %`)}</span>}
+              </span>
+              {detResult?.classes && (
+                <select
+                  aria-label={t.det_sel_type}
+                  value={selDet.cls ?? ''}
+                  onChange={(e) => {
+                    const c = Number(e.target.value);
+                    editDetections((list) => list.map((d) => (d.id === selDet.id ? { ...d, cls: c, review: d.review === 'rejected' ? d.review : 'confirmed' } : d)));
+                  }}
+                  data-testid="det-type"
+                >
+                  {t.ai_profiles_classes.map((name, c) => (
+                    <option key={c} value={c}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {selDet.review !== 'confirmed' && (
+                <button
+                  className="btn small"
+                  onClick={() => editDetections((list) => list.map((d) => (d.id === selDet.id ? { ...d, review: 'confirmed' } : d)))}
+                  data-testid="det-confirm"
+                >
+                  {t.confirm}
+                </button>
+              )}
+              <button className="btn small danger" onClick={() => detHandlers.onRemove(selDet.id)}>
+                {t.remove}
+              </button>
+              <button className="icon" onClick={() => setSelDetId(null)} aria-label={t.sel_close} title={t.sel_close}>
+                ×
+              </button>
+            </div>
+          )}
+
           {selected && mode === 'circles' && !progress && (
             <div className="selbar" role="group" aria-label={t.selected}>
               <span className="selbar-title">
@@ -1216,12 +1272,41 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             )}
             {mode === 'ai' && !project.ai?.exemplars.length && !progress && <p className="qb-hint">{t.ai_need_exemplar}</p>}
             {aiDownloadError && aiMode && <p className="qb-warn">{aiDownloadError}</p>}
+            {mode === 'profiles' && !!detUncertain?.size && !progress && (
+              <p className="qb-warn" data-testid="quick-uncertain">
+                ⚠ {t.ai_uncertain_short(detUncertain.size)}
+              </p>
+            )}
             {mode === 'ai' && (estimateTooLow(aiSummary) || exemplarsTooDifferent(project.ai?.exemplars ?? [])) && (
               <p className="qb-warn" data-testid="quick-ai-warn">
                 ⚠ {estimateTooLow(aiSummary) ? t.ai_warn_low_short : t.ai_warn_sizes_short(fmt(exemplarSizeRatio(project.ai?.exemplars ?? []), 1))}
               </p>
             )}
           </div>
+          {mode === 'profiles' && detResult?.classes && (
+            <div className="sensbar">
+              <label htmlFor="sens-profiles">{t.sensitivity}</label>
+              <span className="tiny muted">{t.sens_less}</span>
+              <input
+                id="sens-profiles"
+                type="range"
+                min={0}
+                max={100}
+                value={sensitivityFromMinScore(detResult.minScore ?? SCORE_MIN)}
+                onChange={(e) => {
+                  const m = minScoreFromSensitivity(Number(e.target.value));
+                  commit((p) => (isDetectionResult(p.ai?.result) ? { ...p, ai: { ...p.ai!, result: { ...p.ai!.result, minScore: m } } } : p), true);
+                }}
+                aria-describedby="sens-profiles-hint"
+                data-testid="sens-profiles"
+              />
+              <span className="tiny muted">{t.sens_more}</span>
+              <output htmlFor="sens-profiles">{sensitivityFromMinScore(detResult.minScore ?? SCORE_MIN)}</output>
+              <span id="sens-profiles-hint" hidden>
+                {t.profiles_sens_hint}
+              </span>
+            </div>
+          )}
           {mode === 'circles' && (
             // Always visible: the marks on the photo show the effect while the slider moves.
             <div className="sensbar">

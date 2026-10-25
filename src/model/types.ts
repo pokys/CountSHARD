@@ -200,6 +200,11 @@ export interface AiDetectionResult {
   objects: AiDetection[];
   /** Class names of a multi-class model, indexed by AiDetection.cls. */
   classes?: string[];
+  /**
+   * Sensitivity of a model with calibrated scores (steel profiles): unreviewed automatic
+   * detections below this score are hidden and not counted. Missing = all shown.
+   */
+  minScore?: number;
   exemplarsUsed: AiBox[];
   inputExemplarIds: string[];
   durationMs: number;

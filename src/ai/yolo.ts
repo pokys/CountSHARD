@@ -16,8 +16,18 @@ export const YOLO_SIZE = 640;
 export const YOLO_CLASSES = ['circle', 'square', 'angle', 'channel'] as const;
 export type YoloClass = (typeof YOLO_CLASSES)[number];
 
-/** Ultralytics' default confidence threshold. */
+/** Ultralytics' default confidence threshold: the default sensitivity. */
 export const SCORE_MIN = 0.25;
+/** Lowest score kept from the model, so the sensitivity slider can show more without a re-run. */
+export const SCORE_FLOOR = 0.1;
+/** Sensitivity slider (0–100) ↔ minimum score: 0 → 0.6, 70 → 0.25 (default), 100 → 0.1. */
+export function minScoreFromSensitivity(s: number): number {
+  const v = Math.min(100, Math.max(0, s));
+  return v <= 70 ? 0.6 - (0.35 * v) / 70 : 0.25 - (0.15 * (v - 70)) / 30;
+}
+export function sensitivityFromMinScore(m: number): number {
+  return m >= 0.25 ? Math.round((70 * (0.6 - m)) / 0.35) : Math.round(70 + (30 * (0.25 - m)) / 0.15);
+}
 const IOU_MAX = 0.6;
 const NESTED_MAX = 0.7;
 /** Items smaller than this (model pixels) in the overview trigger the tiled pass. */
@@ -242,10 +252,11 @@ export async function yoloDetect(
   const pass = async (t: Tile) => {
     const { tensor, lb } = yoloInput(img, t, YOLO_SIZE, buf);
     const o = await run(tensor);
-    return yoloDecode(o.data, o.n, o.nc, t, lb, innerEdges(t, img.width, img.height));
+    return yoloDecode(o.data, o.n, o.nc, t, lb, innerEdges(t, img.width, img.height), SCORE_FLOOR);
   };
   const overview = dropOversized(yoloSuppress(await pass(full)));
-  const tiles = tilePlan(img.width, img.height, overview);
+  // Tiling is decided on the items shown at the default sensitivity.
+  const tiles = tilePlan(img.width, img.height, overview.filter((b) => b.score >= SCORE_MIN));
   if (!tiles) {
     progress(1);
     return packDetections(overview, 1);
@@ -258,5 +269,6 @@ export async function yoloDetect(
   }
   const tiled = dropOversized(yoloSuppress(all));
   // Tiling found nothing more (e.g. a photo with a few large items): keep the overview.
-  return packDetections(tiled.length >= overview.length ? tiled : overview, tiles.length + 1);
+  const sure = (l: YoloBox[]) => l.filter((b) => b.score >= SCORE_MIN).length;
+  return packDetections(sure(tiled) >= sure(overview) ? tiled : overview, tiles.length + 1);
 }

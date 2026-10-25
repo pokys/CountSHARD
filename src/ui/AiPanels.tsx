@@ -4,7 +4,7 @@ import { type AiState, type Project, inCountArea, isDensityResult, isDetectionRe
 import { type AiStatus, aiClient } from '../ai/client';
 import { type EstimateSummary, estimateTooLow, exemplarSizeRatio, exemplarsTooDifferent, removeCorrection, removeExemplar, resultIsStale, roundEstimate, setCorrectionCount } from '../ai/estimate';
 import { type AiModelChoice, heavyModelWarning } from '../ai/device';
-import { EXEMPLAR_FIT_BIG, EXEMPLAR_FIT_SMALL, GECO2_MIN_EXEMPLAR_PX, exemplarFit, geco2ExemplarSide } from '../ai/geco2';
+import { EXEMPLAR_FIT_BIG, EXEMPLAR_FIT_SMALL, GECO2_MIN_EXEMPLAR_PX, exemplarFit, geco2ExemplarSide, isUncertain, shownDetections } from '../ai/geco2';
 import type { Rect } from '../ai/estimate';
 import type { Commit } from './Workspace';
 
@@ -20,7 +20,8 @@ export function AiDetectionResultPanel({ project, count }: { project: Project; c
   const { t, fmt } = useI18n();
   const res = project.ai?.result;
   if (!isDetectionResult(res)) return null;
-  const inArea = res.objects.filter((d) => inCountArea(project.countArea, d.x + d.w / 2, d.y + d.h / 2));
+  const inArea = shownDetections(res).filter((d) => inCountArea(project.countArea, d.x + d.w / 2, d.y + d.h / 2));
+  const unsure = inArea.filter(isUncertain).length;
   const counted = inArea.filter((d) => d.review !== 'rejected');
   const profiles = !!res.classes;
   const small = !profiles && geco2ExemplarSide(res.exemplarsUsed, res.scale) < GECO2_MIN_EXEMPLAR_PX;
@@ -45,6 +46,11 @@ export function AiDetectionResultPanel({ project, count }: { project: Project; c
       {perClass.length > 0 && (
         <p className="small" data-testid="ai-profiles-classes">
           {perClass.map((x) => `${x.name}: ${x.n}`).join(' · ')}
+        </p>
+      )}
+      {profiles && unsure > 0 && (
+        <p className="small warn" data-testid="ai-uncertain">
+          {t.ai_uncertain(unsure)}
         </p>
       )}
       {!profiles && project.ai && resultIsStale(project.ai) && <p className="small warn">{t.ai_stale}</p>}

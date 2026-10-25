@@ -4,7 +4,7 @@
 import { type AiDensityResult, type AiDetectionResult, type Project, inCountArea } from '../model/types';
 import { GROUP_COLORS, computeStats, numbering, visibleInArea } from '../state/project';
 import { decodeDensity, roundEstimate, summarize } from '../ai/estimate';
-import { asCountedObjects, boxesOf, classGrouping, countedDetections } from '../ai/geco2';
+import { asCountedObjects, boxesOf, classGrouping, countedDetections, shownDetections } from '../ai/geco2';
 import { heatRgba } from '../ai/heatmap';
 import { drawAiOverlay, drawAnnotations, drawCountArea } from './draw';
 import { canvasToBlob } from './image';
@@ -102,8 +102,9 @@ export interface AiDetectionLegendText {
 export async function renderAiDetectionsPng(base: HTMLCanvasElement, p: Project, legend: AiDetectionLegendText): Promise<Blob> {
   const res = p.ai!.result as AiDetectionResult;
   const area = p.countArea ?? null;
-  const objects = asCountedObjects(res.objects);
-  const countedList = countedDetections(res.objects, area);
+  const list = shownDetections(res);
+  const objects = asCountedObjects(list);
+  const countedList = countedDetections(list, area);
   const counted = countedList.length;
   const grouping =
     res.classes && legend.classLabel

@@ -310,6 +310,24 @@ export function boxesOf(list: AiDetection[]): Map<string, { w: number; h: number
   return new Map(list.map((d) => [d.id, { w: d.w, h: d.h }]));
 }
 
+/**
+ * Detections in play: all except unreviewed automatic ones below the result's sensitivity
+ * threshold (the user's confirmed and manual items always stay).
+ */
+export function shownDetections(r: { objects: AiDetection[]; minScore?: number }): AiDetection[] {
+  const m = r.minScore;
+  if (m === undefined) return r.objects;
+  return r.objects.filter((d) => d.source !== 'auto' || d.review !== 'unreviewed' || (d.score ?? 1) >= m);
+}
+
+/** Steel profiles: automatic detections below this score are marked for review. */
+export const UNCERTAIN_SCORE = 0.45;
+
+/** Unreviewed automatic detection the model was unsure about (models with calibrated scores). */
+export function isUncertain(d: AiDetection): boolean {
+  return d.source === 'auto' && d.review === 'unreviewed' && d.score !== undefined && d.score < UNCERTAIN_SCORE;
+}
+
 /** Counted detections: not rejected, centre inside the counting area (if any). */
 export function countedDetections(list: AiDetection[], area: CountArea | null = null): AiDetection[] {
   return list.filter((d) => d.review !== 'rejected' && inCountArea(area, d.x + d.w / 2, d.y + d.h / 2));

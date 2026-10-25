@@ -28,6 +28,8 @@ interface Props {
    * with the 'edit' tool like circle mode (tap removes / adds).
    */
   boxes?: Map<string, { w: number; h: number }> | null;
+  /** Detections to mark as uncertain. */
+  uncertain?: Set<string> | null;
   /** Mode B: a rectangle was drawn with the exemplar or region tool (image coordinates). */
   onDrawRect?(kind: 'exemplar' | 'region' | 'area', x1: number, y1: number, x2: number, y2: number): void;
   /** Mode B, exemplar tool: tap an exemplar to select it; drag it to move, drag a corner to resize. */
@@ -118,10 +120,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
           drawAnnotations(ctx, p.objects, p.groups, {
             pxPerUnit: v.s,
             numbers: p.numbers,
-            selectedId: null,
+            selectedId: p.selectedId,
             showRejected: p.showRejected,
             reviewMarks: true,
             boxes: p.boxes,
+            uncertain: p.uncertain ?? undefined,
           });
         }
         const g = gesture.current;
@@ -326,8 +329,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     const hit = p.showOverlay ? hitTest(p.objects, pt.x, pt.y) : null;
     const g: Gesture = { kind: 'tap-or-pan', startX: pt.sx, startY: pt.sy, view: { ...view.current }, t0: performance.now(), moved: false, hitId: hit?.id ?? null };
     gesture.current = g;
-    // Long press on an object with the edit tool selects it (circle mode; AI boxes are not resizable).
-    if (p.tool === 'edit' && hit && !p.boxes) {
+    // Long press on an object with the edit tool selects it (AI boxes: for confirming / changing the type).
+    if (p.tool === 'edit' && hit) {
       clearTimeout(longPress.current);
       longPress.current = setTimeout(() => {
         if (gesture.current !== g || g.moved) return;

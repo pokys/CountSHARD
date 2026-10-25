@@ -19,7 +19,7 @@ import { blobToDataUrl, downloadBlob, renderAiDetectionsPng, renderAiPng, render
 import { canvasToBlob } from '../io/image';
 import { toAiCsv, toAiDetectionsCsv, toCsv, toProjectFile } from '../io/serialize';
 import { roundEstimate, summarize } from '../ai/estimate';
-import { countedDetections } from '../ai/geco2';
+import { countedDetections, shownDetections } from '../ai/geco2';
 import type { Commit } from './Workspace';
 
 /**
@@ -472,7 +472,7 @@ export function useExportPng(project: Project, canvas: HTMLCanvasElement): () =>
     // A generated name already says how many; a user's name gets the count appended.
     const named = (suffix: string) => (project.nameAuto ? `${base}.png` : `${base}-${suffix}.png`);
     if ((project.mode ?? 'circles') !== 'circles' && isDetectionResult(project.ai?.result)) {
-      const n = countedDetections(project.ai!.result.objects, project.countArea ?? null).length;
+      const n = countedDetections(shownDetections(project.ai!.result), project.countArea ?? null).length;
       const blob = await renderAiDetectionsPng(canvas, project, {
         title,
         total: t.legend_det_total,

@@ -20,6 +20,8 @@ export interface DrawOptions {
   reviewMarks?: boolean;
   /** Objects with a box (AI detections) are drawn as rectangles of this size around their centre. */
   boxes?: Map<string, { w: number; h: number }>;
+  /** Detections the model was unsure about: amber "?" badge in the box corner. */
+  uncertain?: Set<string>;
 }
 
 function shapePath(ctx: CanvasRenderingContext2D, obj: CountedObject, grow: number, box?: { w: number; h: number }) {
@@ -114,6 +116,20 @@ export function drawAnnotations(ctx: CanvasRenderingContext2D, objects: CountedO
       ctx.closePath();
       ctx.fillStyle = REVIEW_COLOR;
       ctx.fill();
+    }
+    if (o.uncertain?.has(obj.id)) {
+      const s = Math.max(7 * u, (box ? Math.min(box.w, box.h) : obj.r * 2) * 0.16);
+      const cx = obj.x - (box ? box.w / 2 : obj.r * 0.7) + s;
+      const cy = obj.y - (box ? box.h / 2 : obj.r * 0.7) + s;
+      ctx.beginPath();
+      ctx.arc(cx, cy, s, 0, Math.PI * 2);
+      ctx.fillStyle = REVIEW_COLOR;
+      ctx.fill();
+      ctx.font = `800 ${s * 1.5}px system-ui, -apple-system, Segoe UI, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#0f172a';
+      ctx.fillText('?', cx, cy + s * 0.05);
     }
     if (o.reviewMarks && obj.source === 'manual') {
       ctx.beginPath();
