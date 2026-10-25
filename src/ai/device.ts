@@ -9,8 +9,8 @@
  */
 import type { Geco2Size } from './geco2';
 
-/** 'profiles' = the steel-profile detector; never picked by "Automaticky" (it only knows steel). */
-export type AiModelChoice = 'auto' | 'loca' | 'geco2' | 'profiles';
+/** Model choice of the generic-objects mode (the steel-profiles mode has its own model). */
+export type AiModelChoice = 'auto' | 'loca' | 'geco2';
 export type ResolvedModel = 'loca' | 'geco2' | 'profiles';
 export type Geco2Variant = 'webgpu-1024' | 'wasm-768';
 
@@ -134,7 +134,7 @@ function set(k: string, v: string | null) {
 
 export function loadChoice(): AiModelChoice {
   const v = get(KEY_CHOICE);
-  return v === 'loca' || v === 'geco2' || v === 'profiles' ? v : 'auto';
+  return v === 'loca' || v === 'geco2' ? v : 'auto';
 }
 export function saveChoice(c: AiModelChoice) {
   set(KEY_CHOICE, c === 'auto' ? null : c);

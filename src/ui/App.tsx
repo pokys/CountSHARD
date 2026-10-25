@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
-import type { Project } from '../model/types';
-import { createProject, relabel } from '../state/project';
+import type { CountMode, Project } from '../model/types';
+import { createProject, migrateMode, relabel } from '../state/project';
 import { ImageLoadError, blobToCanvas, loadImageFile } from '../io/image';
 import { deleteProject, listProjects, loadProject, requestPersistence, saveProject, type ProjectSummary } from '../io/db';
 import { dataUrlToBlob } from '../io/export';
@@ -23,7 +23,7 @@ export interface Session {
 
 /** Brings projects saved by older versions up to date (e.g. group colours that are now reserved). */
 function normalize(p: Project): Project {
-  return { ...p, groups: relabel(p.objects, p.groups) };
+  return migrateMode({ ...p, groups: relabel(p.objects, p.groups) });
 }
 
 export function App() {
@@ -54,12 +54,13 @@ export function App() {
     return () => clearTimeout(id);
   }, [refreshRecent]);
 
-  const openFile = async (file: Blob, name: string) => {
+  /** New photos start in the steel-profiles mode; the synthetic demo shows the circle detector. */
+  const openFile = async (file: Blob, name: string, mode: CountMode = 'profiles') => {
     setError(null);
     setBusy(true);
     try {
       const img = await loadImageFile(file, name);
-      const project = createProject(img.info);
+      const project: Project = { ...createProject(img.info), mode, ...(mode === 'profiles' ? { aiFor: 'profiles' as const } : {}) };
       try {
         await saveProject(project, img.blob);
         void requestPersistence();
@@ -77,7 +78,7 @@ export function App() {
 
   const openDemo = async () => {
     const blob = await makeDemoImage();
-    await openFile(blob, `${t.demo_name}.png`);
+    await openFile(blob, `${t.demo_name}.png`, 'circles');
   };
 
   const openSaved = async (id: string) => {

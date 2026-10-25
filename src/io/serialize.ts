@@ -1,7 +1,7 @@
 /**
  * DOM-free serialisation: CSV results and JSON project files (testable in Node).
  */
-import { type Project, isCounted, isDetectionResult } from '../model/types';
+import { type AiState, type Project, isCounted, isDetectionResult } from '../model/types';
 import { computeStats, numbering } from '../state/project';
 import { decodeDensity, summarize } from '../ai/estimate';
 import { asCountedObjects, countedDetections } from '../ai/geco2';
@@ -198,7 +198,7 @@ export interface ProjectFile {
     /** Mode A: individually counted objects. */
     total: number;
     groups: { label: string; count: number; medianDiameterPx: number; medianDiameterMm: number | null }[];
-    mode: 'circles' | 'ai';
+    mode: 'circles' | 'ai' | 'profiles';
     /** Mode B: the AI estimate (LOCA; present only when one was computed). */
     estimate?: EstimateFileSummary;
     /** Mode B: individually detected objects (GeCo2). */
@@ -250,13 +250,14 @@ export function parseProjectFile(text: string): ProjectFile {
   for (const o of p.objects) {
     if (![o.x, o.y, o.r].every((v) => typeof v === 'number' && Number.isFinite(v)) || typeof o.id !== 'string') throw new ProjectFileError('objects');
   }
-  if (p.mode !== undefined && p.mode !== 'circles' && p.mode !== 'ai') throw new ProjectFileError('mode');
-  if (p.ai) validateAi(p);
+  if (p.mode !== undefined && p.mode !== 'circles' && p.mode !== 'ai' && p.mode !== 'profiles') throw new ProjectFileError('mode');
+  if (p.aiFor !== undefined && p.aiFor !== 'ai' && p.aiFor !== 'profiles') throw new ProjectFileError('mode');
+  if (p.ai) validateAi(p.ai);
+  if (p.aiOther) validateAi(p.aiOther);
   return f as ProjectFile;
 }
 
-function validateAi(p: Project) {
-  const ai = p.ai!;
+function validateAi(ai: AiState) {
   const box = (b: unknown) => {
     const o = b as Record<string, unknown>;
     return !!o && typeof o.id === 'string' && ['x', 'y', 'w', 'h'].every((k) => typeof o[k] === 'number' && Number.isFinite(o[k]));

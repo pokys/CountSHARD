@@ -21,7 +21,7 @@ import {
   yoloSuppress,
 } from '../../src/ai/yolo';
 import { classGroups, detectionClassAt, toProjectDetections } from '../../src/ai/geco2';
-import { createProject } from '../../src/state/project';
+import { createProject, migrateMode, switchMode } from '../../src/state/project';
 import { detectionSummary, parseProjectFile, toAiDetectionsCsv, toProjectFile } from '../../src/io/serialize';
 
 /** Builds a raw [4 + nc, n] output from (cx, cy, w, h, cls, score) rows. */
@@ -127,6 +127,34 @@ describe('YOLO pre/post-processing', () => {
     expect(lines.filter((l) => l.includes('U channels'))).toHaveLength(2);
     const back = parseProjectFile(JSON.stringify(toProjectFile(p, 'data:image/jpeg;base64,AAAA')));
     expect((back.project.ai!.result as { objects: { cls?: number }[] }).objects.map((o) => o.cls)).toEqual([3, 0, 3]);
+  });
+
+  it('keeps separate state for the steel-profiles and generic AI modes', () => {
+    const p = createProject({ name: 'x.jpg', width: 400, height: 200, originalWidth: 400, originalHeight: 200, mime: 'image/jpeg' });
+    const prof = { exemplars: [], corrections: [], result: null };
+    const gen = { exemplars: [{ id: 'e', x: 1, y: 1, w: 5, h: 5 }], corrections: [], result: null };
+    let q = switchMode({ ...p, mode: 'profiles', aiFor: 'profiles', ai: prof }, 'circles');
+    expect(q.ai).toBe(prof);
+    q = switchMode(q, 'ai');
+    expect(q.ai).toBeNull();
+    expect(q.aiOther).toBe(prof);
+    q = switchMode({ ...q, ai: gen }, 'profiles');
+    expect(q.ai).toBe(prof);
+    expect(q.aiOther).toBe(gen);
+    expect(q.aiFor).toBe('profiles');
+    // A new project in the profiles mode without an explicit owner.
+    const n = switchMode({ ...p, mode: 'profiles', ai: prof }, 'ai');
+    expect(n.ai).toBeNull();
+    expect(n.aiOther).toBe(prof);
+  });
+
+  it('moves a steel-profiles result saved in the generic AI mode to its own mode', () => {
+    const p = createProject({ name: 'x.jpg', width: 400, height: 200, originalWidth: 400, originalHeight: 200, mime: 'image/jpeg' });
+    const result = { kind: 'detections' as const, modelId: 'profiles', model: 'm', engine: 'x', inputSize: 640, scale: 1, objects: [], exemplarsUsed: [], inputExemplarIds: [], durationMs: 1, at: '' };
+    const m = migrateMode({ ...p, mode: 'ai', ai: { exemplars: [], corrections: [], result } });
+    expect(m.mode).toBe('profiles');
+    expect(m.aiFor).toBe('profiles');
+    expect(migrateMode({ ...p, mode: 'ai' }).mode).toBe('ai');
   });
 });
 

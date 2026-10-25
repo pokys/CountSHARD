@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
-import { type AiDetection, type CountArea, type MultiShotInfo, type Project, type SizeGroup, inCountArea, isCounted, isDensityResult, isDetectionResult, isSelectable } from '../model/types';
+import { type AiDetection, type CountArea, type CountMode, type MultiShotInfo, type Project, type SizeGroup, inCountArea, isCounted, isDensityResult, isDetectionResult, isSelectable } from '../model/types';
 import { clusterRadii, median } from '../analysis/clustering';
 import { CancelledError, analysisClient } from '../analysis/client';
 import { ImageLoadError, analysisPixels, loadImageFile } from '../io/image';
@@ -17,6 +17,7 @@ import {
   newId,
   numbering,
   removeGroup,
+  switchMode,
   removeObject,
   setObjectGroup,
   setReview,
@@ -85,7 +86,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const { t, fmt } = useI18n();
   const [hist, setHist] = useState<History<Project>>(() => initHistory(session.project));
   const project = hist.present;
-  const [tool, setTool] = useState<Tool>(session.project.mode === 'ai' ? 'pan' : 'edit');
+  const [tool, setTool] = useState<Tool>((session.project.mode ?? 'circles') !== 'circles' && !isDetectionResult(session.project.ai?.result) ? 'pan' : 'edit');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showOverlay, setShowOverlay] = useState(true);
   const [showNumbers, setShowNumbers] = useState(true);
@@ -294,17 +295,22 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   // New photos are analysed immediately.
   const autoRan = useRef(false);
   useEffect(() => {
-    if (session.autoAnalyze && !autoRan.current) {
+    if (session.autoAnalyze && !autoRan.current && (session.project.mode ?? 'circles') === 'circles') {
       autoRan.current = true;
       void runAnalysis();
     }
-  }, [session.autoAnalyze, runAnalysis]);
+  }, [session.autoAnalyze, session.project.mode, runAnalysis]);
 
   // --- Mode B (generic objects, AI density estimate) ---------------------------
   const mode = project.mode ?? 'circles';
+  /** One of the AI modes (generic objects or steel profiles). */
+  const aiMode = mode !== 'circles';
   const [aiStatus, setAiStatus] = useState<AiStatus>(aiClient.status);
   useEffect(() => aiClient.subscribe(setAiStatus), []);
   useEffect(() => void aiClient.refresh(), []);
+  useEffect(() => {
+    if (mode !== 'circles') void aiClient.setMode(mode);
+  }, [mode]);
   const [aiDownloadError, setAiDownloadError] = useState<string | null>(null);
   const [pendingRegion, setPendingRegion] = useState<PendingRegion | null>(null);
   const [regionError, setRegionError] = useState<string | null>(null);
@@ -324,7 +330,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   const detNumbers = useMemo(() => numbering(detObjects, project.countArea ?? null), [detObjects, project.countArea]);
   const detBoxes = useMemo(() => (detResult ? boxesOf(detResult.objects) : null), [detResult]);
   const detCount = useMemo(() => (detResult ? countedDetections(detResult.objects, project.countArea ?? null).length : 0), [detResult, project.countArea]);
-  const aiModel = aiStatus.decision?.model ?? 'loca';
+  const aiModel = aiStatus.active;
   const [showHeat, setShowHeat] = useState(true);
 
   // Phones kill the tab when OpenCV's WASM heap and the AI model are both resident, so the
@@ -334,12 +340,17 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     onEngineUnloaded();
   }, [onEngineUnloaded]);
 
-  const setMode = (m: 'circles' | 'ai') => {
+  const setMode = (m: CountMode) => {
     if (m === mode) return;
     if (progress) return;
-    commit((p) => ({ ...p, mode: m, ai: p.ai ?? (m === 'ai' ? emptyAiState() : p.ai) }));
-    if (m === 'ai') freeOpenCv();
-    setTool(m === 'ai' ? (detResult ? 'edit' : (project.ai?.exemplars.length ?? 0) > 0 || aiModel === 'profiles' ? 'pan' : 'exemplar') : 'edit');
+    const next = switchMode(project, m);
+    commit((p) => {
+      const q = switchMode(p, m);
+      return m === 'circles' ? q : { ...q, ai: q.ai ?? emptyAiState() };
+    });
+    if (m !== 'circles') freeOpenCv();
+    const nextDet = isDetectionResult(next.ai?.result);
+    setTool(m === 'circles' || nextDet ? 'edit' : m === 'profiles' || (next.ai?.exemplars.length ?? 0) > 0 ? 'pan' : 'exemplar');
     setPendingRegion(null);
     setSelectedId(null);
   };
@@ -522,6 +533,16 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     }
   }, [hist.present.ai, session.canvas, commit, onError, freeOpenCv, runGeco2, runProfiles, t]);
 
+  // A new photo in the steel-profiles mode is counted as soon as the model is available (at once,
+  // or right after its first download).
+  const autoRanProfiles = useRef(false);
+  useEffect(() => {
+    if (!session.autoAnalyze || autoRanProfiles.current || mode !== 'profiles' || progress) return;
+    if (aiStatus.active !== 'profiles' || !aiStatus.downloaded || isDetectionResult(hist.present.ai?.result)) return;
+    autoRanProfiles.current = true;
+    void runAi();
+  }, [session.autoAnalyze, mode, progress, aiStatus.active, aiStatus.downloaded, hist.present.ai, runAi]);
+
   /** Sets (or clears) the counting area; size groups are recomputed for the objects inside it. */
   const setCountArea = (area: CountArea | null) =>
     commit((p) => ({ ...p, countArea: area, ...applyGrouping(p.objects, p.groups, p.grouping, area) }));
@@ -562,7 +583,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
   };
 
   const aiOverlay: AiOverlay | null =
-    mode === 'ai'
+    aiMode
       ? {
           heat: showHeat ? heat : null,
           heatWidth: aiResult ? aiResult.gridW * aiResult.cellPx : 0,
@@ -757,7 +778,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
           { id: 'area', label: t.tool_area, testId: 'tool-area' },
         ]
       : [
-          ...(aiModel === 'profiles' ? [] : [{ id: 'exemplar' as Tool, label: t.ai_tool_exemplar, testId: 'tool-exemplar' }]),
+          ...(mode === 'profiles' ? [] : [{ id: 'exemplar' as Tool, label: t.ai_tool_exemplar, testId: 'tool-exemplar' }]),
           ...(detResult
             ? [{ id: 'edit' as Tool, label: t.ai_tool_edit, testId: 'tool-ai-edit' }]
             : aiResult
@@ -787,6 +808,9 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     <div className="modebar seg" role="radiogroup" aria-label={t.mode_label}>
       <button className={mode === 'circles' ? 'on' : ''} onClick={() => setMode('circles')} role="radio" aria-checked={mode === 'circles'} disabled={!!progress} data-testid="mode-circles">
         {t.mode_circles}
+      </button>
+      <button className={mode === 'profiles' ? 'on' : ''} onClick={() => setMode('profiles')} role="radio" aria-checked={mode === 'profiles'} disabled={!!progress} data-testid="mode-profiles">
+        {t.mode_profiles}
       </button>
       <button className={mode === 'ai' ? 'on' : ''} onClick={() => setMode('ai')} role="radio" aria-checked={mode === 'ai'} disabled={!!progress} data-testid="mode-ai">
         {t.mode_ai}
@@ -875,22 +899,22 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
           <Viewer
             ref={viewerRef}
             image={session.canvas}
-            objects={mode === 'ai' ? detShownGrouped : shownObjects}
-            groups={mode === 'ai' ? detGrouping.groups : project.groups}
+            objects={aiMode ? detShownGrouped : shownObjects}
+            groups={aiMode ? detGrouping.groups : project.groups}
             area={project.countArea ?? null}
-            numbers={showNumbers ? (mode === 'ai' ? detNumbers : numbers) : null}
+            numbers={showNumbers ? (aiMode ? detNumbers : numbers) : null}
             selectedId={mode === 'circles' ? selectedId : null}
             tool={tool}
             showOverlay={showOverlay && !comparing}
             showRejected={showRejected}
             ai={aiOverlay}
-            boxes={mode === 'ai' ? detBoxes : null}
+            boxes={aiMode ? detBoxes : null}
             onDrawRect={onDrawRect}
             onDrawArea={onDrawArea}
             onSelectRegion={setSelectedRegionId}
             onSelectExemplar={setSelectedExemplarId}
             onExemplarChange={onExemplarChange}
-            {...(mode === 'ai' ? detHandlers : handlers)}
+            {...(aiMode ? detHandlers : handlers)}
           />
 
           <div className="stage-top">
@@ -941,7 +965,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                 <label className="toggle">
                   <input type="checkbox" checked={showOverlay} onChange={(e) => setShowOverlay(e.target.checked)} /> {t.overlay}
                 </label>
-                {mode === 'ai' && !detResult ? (
+                {aiMode && !detResult ? (
                   <label className="toggle">
                     <input type="checkbox" checked={showHeat} onChange={(e) => setShowHeat(e.target.checked)} /> {t.ai_heat}
                   </label>
@@ -1137,8 +1161,8 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                 {groupChips}
               </div>
             )}
-            {mode === 'ai' && aiModel !== 'profiles' && !project.ai?.exemplars.length && !progress && <p className="qb-hint">{t.ai_need_exemplar}</p>}
-            {aiDownloadError && mode === 'ai' && <p className="qb-warn">{aiDownloadError}</p>}
+            {mode === 'ai' && !project.ai?.exemplars.length && !progress && <p className="qb-hint">{t.ai_need_exemplar}</p>}
+            {aiDownloadError && aiMode && <p className="qb-warn">{aiDownloadError}</p>}
             {mode === 'ai' && (estimateTooLow(aiSummary) || exemplarsTooDifferent(project.ai?.exemplars ?? [])) && (
               <p className="qb-warn" data-testid="quick-ai-warn">
                 ⚠ {estimateTooLow(aiSummary) ? t.ai_warn_low_short : t.ai_warn_sizes_short(fmt(exemplarSizeRatio(project.ai?.exemplars ?? []), 1))}
@@ -1179,7 +1203,7 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
               </button>
             </div>
           )}
-          {mode === 'ai' ? (
+          {aiMode ? (
             <>
               <div ref={resultRef}>
                 {detResult ? (

@@ -128,9 +128,10 @@ export interface MultiShotInfo {
  * Counting mode. `circles` = Mode A (round-end detector, individually editable objects).
  * `ai` = Mode B (generic objects from exemplars). Its result is either a LOCA density map with a
  * total ESTIMATE (no individual objects), or GeCo2 detections (individual, editable boxes).
- * Circle objects and AI results never mix.
+ * `profiles` = steel products seen end-on (pretrained detector, no exemplars; result = detections
+ * with a profile type). Circle objects and AI results never mix.
  */
-export type CountMode = 'circles' | 'ai';
+export type CountMode = 'circles' | 'ai' | 'profiles';
 
 /** Axis-aligned box in project-image pixels. */
 export interface AiBox {
@@ -227,8 +228,12 @@ export interface Project {
   version: 1;
   /** Missing in projects saved before Mode B existed (= `circles`). */
   mode?: CountMode;
-  /** Mode B state; missing/null until the user starts AI counting. */
+  /** State of the AI mode named by `aiFor` (`ai` or `profiles`); missing/null until first used. */
   ai?: AiState | null;
+  /** Which mode `ai` belongs to; missing = `ai` (projects saved before the profiles mode). */
+  aiFor?: 'ai' | 'profiles';
+  /** State of the other AI mode, kept while `ai` holds this one's. */
+  aiOther?: AiState | null;
   id: string;
   name: string;
   createdAt: string;

@@ -214,8 +214,9 @@ export const en: typeof cs = {
   demo_name: 'Demo – pipes',
   // Mode B – generic objects (AI density estimate)
   mode_label: 'Counting mode',
-  mode_circles: 'Round objects',
-  mode_ai: 'Generic objects (AI)',
+  mode_circles: 'Round',
+  mode_profiles: 'Steel',
+  mode_ai: 'Generic',
   offline_ai_downloaded: 'AI model downloaded to this device',
   offline_ai_ready: 'AI ready',
   ai_title: 'Generic objects – AI estimate',

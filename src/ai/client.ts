@@ -42,6 +42,8 @@ export interface AiStatus {
   choice: AiModelChoice;
   /** The model the choice resolves to on this device (null until the device profile is known). */
   decision: ModelDecision | null;
+  /** The model the current mode uses: 'profiles' in the steel-profiles mode, else decision.model. */
+  active: ResolvedModel;
   /** GeCo2 backend and input size for this device. */
   geco2: Geco2Plan | null;
   profile: DeviceProfile | null;
@@ -173,6 +175,7 @@ class AiClient {
   status: AiStatus = {
     choice: 'auto',
     decision: null,
+    active: 'loca',
     geco2: null,
     profile: null,
     downloaded: false,
@@ -204,12 +207,25 @@ class AiClient {
     this.set({ crash: null });
   }
 
+  private mode: 'ai' | 'profiles' = 'ai';
+
   /** The model the next run uses (LOCA until the device profile is known). */
   get model(): ResolvedModel {
-    return this.status.decision?.model ?? 'loca';
+    return this.mode === 'profiles' ? 'profiles' : (this.status.decision?.model ?? 'loca');
   }
 
+  /** The counting mode in use: the steel-profiles mode always uses its own model. */
+  async setMode(mode: 'ai' | 'profiles'): Promise<void> {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    await this.refresh();
+  }
+
+  private refreshSeq = 0;
+
+  /** Recomputes the status; a refresh overtaken by a newer one (e.g. a mode switch) is dropped. */
   async refresh(): Promise<AiStatus> {
+    const seq = ++this.refreshSeq;
     const choice = loadChoice();
     let profile = this.status.profile;
     try {
@@ -219,7 +235,8 @@ class AiClient {
     }
     const decision = profile ? resolveModel(choice, profile) : ({ model: choice === 'auto' ? 'loca' : choice, reason: null } as ModelDecision);
     const plan = profile ? geco2Plan(profile) : null;
-    const { assets } = assetsFor(decision.model, plan);
+    const active: ResolvedModel = this.mode === 'profiles' ? 'profiles' : decision.model;
+    const { assets } = assetsFor(active, plan);
     const [downloaded, missing, loca, g768, g1024, prof] = await Promise.all([
       aiDownloaded(assets),
       missingBytes(assets),
@@ -228,7 +245,8 @@ class AiClient {
       aiDownloaded(geco2Assets(1024)),
       aiDownloaded(profilesAssets()),
     ]);
-    this.set({ choice, profile, decision, geco2: plan, downloaded, missingBytes: missing, models: { loca, geco2_768: g768, geco2_1024: g1024, profiles: prof } });
+    if (seq !== this.refreshSeq) return this.status;
+    this.set({ choice, profile, decision, active, geco2: plan, downloaded, missingBytes: missing, models: { loca, geco2_768: g768, geco2_1024: g1024, profiles: prof } });
     return this.status;
   }
 

@@ -468,13 +468,13 @@ export function useExportPng(project: Project, canvas: HTMLCanvasElement): () =>
   return async () => {
     const base = safeFilename(project.name);
     const date = new Date().toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB');
-    if (project.mode === 'ai' && isDetectionResult(project.ai?.result)) {
+    if ((project.mode ?? 'circles') !== 'circles' && isDetectionResult(project.ai?.result)) {
       const n = countedDetections(project.ai!.result.objects, project.countArea ?? null).length;
       const blob = await renderAiDetectionsPng(canvas, project, { title: t.legend_title, total: t.legend_det_total, footer: `${t.legend_det_footer(date)} ${project.ai!.result.model}` });
       downloadBlob(blob, `${base}-${t.ai_det_qb}-${n}.png`);
       return;
     }
-    if (project.mode === 'ai') {
+    if ((project.mode ?? 'circles') !== 'circles') {
       const aiSum = project.ai ? summarize(project.ai, project.countArea ?? null) : null;
       if (!aiSum) return;
       const blob = await renderAiPng(canvas, project, {
@@ -505,7 +505,7 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
   useEffect(() => setName(project.name), [project.name]);
   const base = safeFilename(project.name);
 
-  const aiMode = project.mode === 'ai';
+  const aiMode = (project.mode ?? 'circles') !== 'circles';
   const aiDet = aiMode && isDetectionResult(project.ai?.result);
   const aiSum = aiMode && project.ai ? summarize(project.ai, project.countArea ?? null) : null;
   const aiHasResult = aiDet || !!aiSum;

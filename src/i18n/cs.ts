@@ -223,8 +223,9 @@ export const cs = {
   demo_name: 'Ukázka – trubky',
   // Mode B – generic objects (AI density estimate)
   mode_label: 'Režim počítání',
-  mode_circles: 'Kulaté objekty',
-  mode_ai: 'Obecné objekty (AI)',
+  mode_circles: 'Kulaté',
+  mode_profiles: 'Hutní mat.',
+  mode_ai: 'Obecné',
   offline_ai_downloaded: 'AI model stažen do zařízení',
   offline_ai_ready: 'AI připravena',
   ai_title: 'Obecné objekty – AI odhad',

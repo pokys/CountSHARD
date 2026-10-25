@@ -5,6 +5,7 @@ import { clusterRadii, median, relativeSpread } from '../analysis/clustering';
 import {
   type Calibration,
   type CountArea,
+  type CountMode,
   inCountArea,
   type CountedObject,
   type GroupingParams,
@@ -59,6 +60,38 @@ export function createProject(image: Project['image']): Project {
     analysis: null,
     appVersion: APP_VERSION,
   };
+}
+
+// --- counting modes ----------------------------------------------------------------------
+
+type AiModeName = 'ai' | 'profiles';
+
+/** Which AI mode `p.ai` belongs to (explicit, else inferred from the result and the mode). */
+export function aiOwner(p: Project): AiModeName {
+  if (p.aiFor) return p.aiFor;
+  const r = p.ai?.result;
+  if (r?.kind === 'detections' && r.modelId === 'profiles') return 'profiles';
+  return p.mode === 'profiles' ? 'profiles' : 'ai';
+}
+
+/**
+ * Switches the counting mode. The two AI modes keep their own state: `ai` always holds the
+ * state of the AI mode last used and `aiOther` the other one's, swapped on switching.
+ */
+export function switchMode(p: Project, m: CountMode): Project {
+  if (m === 'circles') return { ...p, mode: m };
+  const owner = aiOwner(p);
+  if (owner === m) return { ...p, mode: m };
+  return { ...p, mode: m, aiFor: m, ai: p.aiOther ?? null, aiOther: p.ai ?? null };
+}
+
+/**
+ * Projects saved before the profiles mode had its own button counted steel profiles in the AI
+ * mode; such a result moves to the profiles mode.
+ */
+export function migrateMode(p: Project): Project {
+  if (p.aiFor || p.ai?.result?.kind !== 'detections' || p.ai.result.modelId !== 'profiles') return p;
+  return { ...p, mode: p.mode === 'ai' ? 'profiles' : p.mode, aiFor: 'profiles' };
 }
 
 export interface DetectedCircle {
