@@ -60,7 +60,7 @@ export function App() {
     setBusy(true);
     try {
       const img = await loadImageFile(file, name);
-      const project: Project = { ...createProject(img.info), mode, ...(mode === 'profiles' ? { aiFor: 'profiles' as const } : {}) };
+      const project: Project = { ...createProject(img.info), mode, nameAuto: true, ...(mode === 'profiles' ? { aiFor: 'profiles' as const } : {}) };
       try {
         await saveProject(project, img.blob);
         void requestPersistence();

@@ -18,6 +18,7 @@ import {
   numbering,
   removeGroup,
   switchMode,
+  autoProjectName,
   removeObject,
   setObjectGroup,
   setReview,
@@ -600,6 +601,26 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
       : null;
 
   const stats = useMemo(() => computeStats(project), [project]);
+
+  // Generated name ("what, how many – time"), kept up to date with the result until the user
+  // names the project. Not an undo step: it follows the counts, which undo restores.
+  const generatedName = useMemo(() => {
+    let what = t.name_what_none[mode];
+    if (mode === 'circles') {
+      if (project.analysis || project.objects.length) what = t.name_what_pcs(t.name_round, stats.total);
+    } else if (detResult?.classes) {
+      const per = new Map<number, number>();
+      for (const d of countedDetections(detResult.objects, project.countArea ?? null)) if (d.cls !== undefined) per.set(d.cls, (per.get(d.cls) ?? 0) + 1);
+      const parts = [...per].sort((a, b) => b[1] - a[1]).map(([c, n]) => t.name_what_pcs(t.ai_profiles_classes[c] ?? t.ai_profiles_unknown, n));
+      what = parts.length ? parts.join(', ') : t.name_what_pcs(t.name_what_none.profiles, 0);
+    } else if (detResult) what = t.name_what_pcs(t.name_items, detCount);
+    else if (aiResult && aiSummary) what = t.name_estimate(roundEstimate(aiSummary.corrected));
+    return autoProjectName(what, project.createdAt);
+  }, [t, mode, project.analysis, project.objects.length, project.countArea, project.createdAt, stats.total, detResult, detCount, aiResult, aiSummary]);
+  useEffect(() => {
+    if (!project.nameAuto || project.name === generatedName) return;
+    setHist((h) => (h.present.nameAuto ? { ...h, present: { ...h.present, name: generatedName } } : h));
+  }, [project.nameAuto, project.name, generatedName]);
   const numbers = useMemo(() => numbering(project.objects, project.countArea ?? null), [project.objects, project.countArea]);
   const shownObjects = useMemo(() => visibleInArea(project).objects, [project]);
   const selected = project.objects.find((o) => o.id === selectedId && isSelectable(o)) ?? null;
@@ -751,13 +772,16 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     setTool(defaultTool);
   };
   const [viewMenu, setViewMenu] = useState(false);
-  // Caption printed on the saved image; edited here, saved on Enter / leaving the field.
-  const [captionOpen, setCaptionOpen] = useState(false);
-  const [captionDraft, setCaptionDraft] = useState(project.caption ?? '');
-  useEffect(() => setCaptionDraft(project.caption ?? ''), [project.caption]);
-  const saveCaption = () => {
-    const v = captionDraft.trim();
-    if (v !== (project.caption ?? '')) commit((p) => ({ ...p, caption: v || undefined }));
+  // Project name, edited here; saved on Enter / leaving the field, empty = generated again.
+  const [nameOpen, setNameOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState(project.name);
+  useEffect(() => setNameDraft(project.name), [project.name]);
+  const saveName = () => {
+    const v = nameDraft.trim();
+    if (!v) {
+      if (!project.nameAuto) commit((p) => ({ ...p, nameAuto: true }));
+      else setNameDraft(project.name);
+    } else if (v !== project.name) commit((p) => ({ ...p, name: v, nameAuto: false }));
   };
   const [sheet, setSheet] = useState<'peek' | 'half' | 'full'>('peek');
   const sheetDrag = useRef<{ y: number; moved: boolean } | null>(null);
@@ -1160,34 +1184,28 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                 )}
               </>
             )}
-            <button
-              className={`btn small${project.caption ? ' on' : ''}`}
-              onClick={() => setCaptionOpen((o) => !o)}
-              aria-expanded={captionOpen}
-              title={t.caption_label}
-              data-testid="quick-caption"
-            >
-              ✎ {t.caption_button}
+            <button className="btn small" onClick={() => setNameOpen((o) => !o)} aria-expanded={nameOpen} title={project.name} data-testid="quick-name">
+              ✎ {t.name_button}
             </button>
-            {captionOpen && (
+            {nameOpen && (
               <label className="qb-caption">
                 <span className="tiny muted">
-                  {t.caption_label} · {t.caption_hint}
+                  {t.name_label} · {t.name_hint}
                 </span>
                 <input
-                  value={captionDraft}
+                  value={nameDraft}
                   maxLength={120}
-                  placeholder={t.caption_placeholder}
-                  onChange={(e) => setCaptionDraft(e.target.value)}
-                  onBlur={saveCaption}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onBlur={saveName}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
-                      saveCaption();
-                      setCaptionOpen(false);
+                      saveName();
+                      setNameOpen(false);
                     }
                   }}
+                  onFocus={(e) => e.target.select()}
                   autoFocus
-                  data-testid="caption-input"
+                  data-testid="name-input"
                 />
               </label>
             )}

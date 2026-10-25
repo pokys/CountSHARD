@@ -21,7 +21,7 @@ import {
   yoloSuppress,
 } from '../../src/ai/yolo';
 import { classGrouping, classGroups, detectionClassAt, toProjectDetections } from '../../src/ai/geco2';
-import { createProject, migrateMode, switchMode } from '../../src/state/project';
+import { autoProjectName, createProject, migrateMode, switchMode } from '../../src/state/project';
 import { detectionSummary, parseProjectFile, toAiDetectionsCsv, toProjectFile } from '../../src/io/serialize';
 
 /** Builds a raw [4 + nc, n] output from (cx, cy, w, h, cls, score) rows. */
@@ -196,4 +196,11 @@ describe.skipIf(!existsSync(MODEL))('steel-profile model end to end (onnxruntime
     if (process.env.YOLO_DUMP) console.log(JSON.stringify(Array.from(d.boxes).map((v) => Math.round(v))));
     expect(d.scores.length).toBeGreaterThan(0);
   }, 300000);
+});
+
+describe('generated project names', () => {
+  it('reads what, how many and when', () => {
+    const iso = new Date(2026, 9, 25, 8, 5).toISOString();
+    expect(autoProjectName('U profily 27 ks', iso)).toBe('U profily 27 ks – 25.10. 8:05');
+  });
 });

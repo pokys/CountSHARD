@@ -42,6 +42,17 @@ export function projectName(fileName: string, now = new Date()): string {
   return `Foto ${now.getDate()}. ${now.getMonth() + 1}. ${p(now.getHours())}:${p(now.getMinutes())}`;
 }
 
+/** "25.10. 8:39" – the time part of a generated project name. */
+export function shortTime(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getDate()}.${d.getMonth() + 1}. ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** Generated project name: what was counted and how many, then when ("U profily 27 ks – 25.10. 8:39"). */
+export function autoProjectName(what: string, createdAt: string): string {
+  return `${what} – ${shortTime(createdAt)}`;
+}
+
 export function createProject(image: Project['image']): Project {
   const now = new Date().toISOString();
   return {

@@ -468,7 +468,9 @@ export function useExportPng(project: Project, canvas: HTMLCanvasElement): () =>
   return async () => {
     const base = safeFilename(project.name);
     const date = new Date().toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB');
-    const title = project.caption?.trim() || t.legend_title;
+    const title = project.name.trim() || t.legend_title;
+    // A generated name already says how many; a user's name gets the count appended.
+    const named = (suffix: string) => (project.nameAuto ? `${base}.png` : `${base}-${suffix}.png`);
     if ((project.mode ?? 'circles') !== 'circles' && isDetectionResult(project.ai?.result)) {
       const n = countedDetections(project.ai!.result.objects, project.countArea ?? null).length;
       const blob = await renderAiDetectionsPng(canvas, project, {
@@ -477,7 +479,7 @@ export function useExportPng(project: Project, canvas: HTMLCanvasElement): () =>
         footer: t.legend_det_footer(date, project.ai!.result.model),
         classLabel: (c) => t.ai_profiles_classes[c] ?? t.ai_profiles_unknown,
       });
-      downloadBlob(blob, `${base}-${t.ai_det_qb}-${n}.png`);
+      downloadBlob(blob, named(`${t.ai_det_qb}-${n}`));
       return;
     }
     if ((project.mode ?? 'circles') !== 'circles') {
@@ -492,7 +494,7 @@ export function useExportPng(project: Project, canvas: HTMLCanvasElement): () =>
         regionLabel: t.ai_region_label,
         fmt,
       });
-      downloadBlob(blob, `${base}-${t.ai_qb}-${roundEstimate(aiSum.corrected)}.png`);
+      downloadBlob(blob, named(`${t.ai_qb}-${roundEstimate(aiSum.corrected)}`));
       return;
     }
     const blob = await renderAnnotatedPng(
@@ -501,7 +503,7 @@ export function useExportPng(project: Project, canvas: HTMLCanvasElement): () =>
       { title, total: t.legend_total, group: t.legend_group, footer: t.legend_footer(date) },
       fd,
     );
-    downloadBlob(blob, `${base}-${project.objects.filter(isCounted).length}.png`);
+    downloadBlob(blob, named(String(project.objects.filter(isCounted).length)));
   };
 }
 
@@ -556,7 +558,15 @@ export function ExportPanel({ project, canvas, commit }: { project: Project; can
     <Card title={t.export_title}>
       <label className="stack">
         <span>{t.project_name}</span>
-        <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== project.name && commit((p) => ({ ...p, name: name.trim() }))} />
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => {
+            const v = name.trim();
+            if (!v) commit((p) => ({ ...p, nameAuto: true }));
+            else if (v !== project.name) commit((p) => ({ ...p, name: v, nameAuto: false }));
+          }}
+        />
       </label>
       <div className="row wrap">
         <button className="btn primary" onClick={png} disabled={aiMode && !aiHasResult} data-testid="export-png">
