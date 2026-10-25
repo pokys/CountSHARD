@@ -20,7 +20,7 @@ import {
   yoloInput,
   yoloSuppress,
 } from '../../src/ai/yolo';
-import { classGroups, detectionClassAt, toProjectDetections } from '../../src/ai/geco2';
+import { classGrouping, classGroups, detectionClassAt, toProjectDetections } from '../../src/ai/geco2';
 import { createProject, migrateMode, switchMode } from '../../src/state/project';
 import { detectionSummary, parseProjectFile, toAiDetectionsCsv, toProjectFile } from '../../src/io/serialize';
 
@@ -103,6 +103,9 @@ describe('YOLO pre/post-processing', () => {
     expect(detectionClassAt(d, 26, 4)).toBe(0);
     const g = classGroups(d);
     expect([...g.keys()].sort()).toEqual([0, 3]);
+    const cg = classGrouping(d, d.map((x) => x.id), (c) => `c${c}`, ['red', 'blue']);
+    expect(cg.groups.map((x) => [x.label, x.color])).toEqual([['c0', 'red'], ['c3', 'blue']]);
+    expect(classGrouping(d.slice(0, 1), [d[0]!.id], String, ['red']).groups).toHaveLength(0);
   });
 
   it('exports the profile type in the CSV and the project summary, and reads it back', () => {

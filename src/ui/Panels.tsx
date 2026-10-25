@@ -468,9 +468,15 @@ export function useExportPng(project: Project, canvas: HTMLCanvasElement): () =>
   return async () => {
     const base = safeFilename(project.name);
     const date = new Date().toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB');
+    const title = project.caption?.trim() || t.legend_title;
     if ((project.mode ?? 'circles') !== 'circles' && isDetectionResult(project.ai?.result)) {
       const n = countedDetections(project.ai!.result.objects, project.countArea ?? null).length;
-      const blob = await renderAiDetectionsPng(canvas, project, { title: t.legend_title, total: t.legend_det_total, footer: `${t.legend_det_footer(date)} ${project.ai!.result.model}` });
+      const blob = await renderAiDetectionsPng(canvas, project, {
+        title,
+        total: t.legend_det_total,
+        footer: t.legend_det_footer(date, project.ai!.result.model),
+        classLabel: (c) => t.ai_profiles_classes[c] ?? t.ai_profiles_unknown,
+      });
       downloadBlob(blob, `${base}-${t.ai_det_qb}-${n}.png`);
       return;
     }
@@ -478,7 +484,7 @@ export function useExportPng(project: Project, canvas: HTMLCanvasElement): () =>
       const aiSum = project.ai ? summarize(project.ai, project.countArea ?? null) : null;
       if (!aiSum) return;
       const blob = await renderAiPng(canvas, project, {
-        title: t.legend_title,
+        title,
         total: t.legend_ai_total,
         corrected: t.legend_ai_corrected,
         note: t.ai_result_note,
@@ -492,7 +498,7 @@ export function useExportPng(project: Project, canvas: HTMLCanvasElement): () =>
     const blob = await renderAnnotatedPng(
       canvas,
       project,
-      { title: t.legend_title, total: t.legend_total, group: t.legend_group, footer: t.legend_footer(date) },
+      { title, total: t.legend_total, group: t.legend_group, footer: t.legend_footer(date) },
       fd,
     );
     downloadBlob(blob, `${base}-${project.objects.filter(isCounted).length}.png`);

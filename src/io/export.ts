@@ -2,9 +2,9 @@
  * Browser exports: annotated PNG, downloads, data URLs.
  */
 import { type AiDensityResult, type AiDetectionResult, type Project, inCountArea } from '../model/types';
-import { computeStats, numbering, visibleInArea } from '../state/project';
+import { GROUP_COLORS, computeStats, numbering, visibleInArea } from '../state/project';
 import { decodeDensity, roundEstimate, summarize } from '../ai/estimate';
-import { asCountedObjects, boxesOf, countedDetections } from '../ai/geco2';
+import { asCountedObjects, boxesOf, classGrouping, countedDetections } from '../ai/geco2';
 import { heatRgba } from '../ai/heatmap';
 import { drawAiOverlay, drawAnnotations, drawCountArea } from './draw';
 import { canvasToBlob } from './image';
@@ -94,6 +94,8 @@ export interface AiDetectionLegendText {
   title: string;
   total: (n: number) => string;
   footer: string;
+  /** Label of a class of a multi-class result (steel profiles). */
+  classLabel?: (cls: number) => string;
 }
 
 /** Mode B with GeCo2: photo + numbered detection boxes + exemplars, legend with the count and the model. */
@@ -101,18 +103,26 @@ export async function renderAiDetectionsPng(base: HTMLCanvasElement, p: Project,
   const res = p.ai!.result as AiDetectionResult;
   const area = p.countArea ?? null;
   const objects = asCountedObjects(res.objects);
-  const counted = countedDetections(res.objects, area).length;
+  const countedList = countedDetections(res.objects, area);
+  const counted = countedList.length;
+  const grouping =
+    res.classes && legend.classLabel
+      ? classGrouping(res.objects, countedList.map((d) => d.id), legend.classLabel, GROUP_COLORS)
+      : { groups: [], byId: new Map<string, string>() };
+  const groupCounts = grouping.groups.map((g) => ({ g, n: [...grouping.byId.values()].filter((id) => id === g.id).length }));
   const w = base.width;
   const unit = Math.max(1, w / 1200);
   const lineH = 26 * unit;
-  const legendH = Math.round(lineH * 2 + 24 * unit);
+  const groupLines = Math.ceil(groupCounts.length / 3);
+  const legendH = Math.round(lineH * (2 + groupLines) + 24 * unit);
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = base.height + legendH;
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(base, 0, 0);
   const ppu = 1 / Math.max(1, w / 1600);
-  drawAnnotations(ctx, objects.filter((o) => inCountArea(area, o.x, o.y)), [], {
+  const shown = objects.filter((o) => inCountArea(area, o.x, o.y)).map((o) => ({ ...o, groupId: grouping.byId.get(o.id) ?? null }));
+  drawAnnotations(ctx, shown, grouping.groups, {
     pxPerUnit: ppu,
     numbers: numbering(objects, area),
     selectedId: null,
@@ -131,6 +141,19 @@ export async function renderAiDetectionsPng(base: HTMLCanvasElement, p: Project,
   ctx.font = `700 ${20 * unit}px system-ui, sans-serif`;
   ctx.fillText(`${legend.title} — ${legend.total(counted)}`, x0, y);
   y += lineH;
+  ctx.font = `500 ${16 * unit}px system-ui, sans-serif`;
+  const colW = (w - 2 * x0) / 3;
+  groupCounts.forEach(({ g, n }, i) => {
+    const cx = x0 + (i % 3) * colW;
+    const cy = y + Math.floor(i / 3) * lineH;
+    ctx.fillStyle = g.color;
+    ctx.beginPath();
+    ctx.arc(cx + 8 * unit, cy, 7 * unit, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillText(`${g.label}: ${legend.total(n)}`, cx + 22 * unit, cy);
+  });
+  y += groupLines * lineH;
   ctx.fillStyle = '#94a3b8';
   ctx.font = `400 ${13 * unit}px system-ui, sans-serif`;
   ctx.fillText(legend.footer, x0, y);

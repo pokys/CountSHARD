@@ -228,6 +228,8 @@ export interface Project {
   version: 1;
   /** Missing in projects saved before Mode B existed (= `circles`). */
   mode?: CountMode;
+  /** User's caption printed as the title of the exported PNG (empty = app name). */
+  caption?: string;
   /** State of the AI mode named by `aiFor` (`ai` or `profiles`); missing/null until first used. */
   ai?: AiState | null;
   /** Which mode `ai` belongs to; missing = `ai` (projects saved before the profiles mode). */

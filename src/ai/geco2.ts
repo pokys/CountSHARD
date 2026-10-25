@@ -238,6 +238,26 @@ export function detectionClassAt(list: AiDetection[], x: number, y: number): num
   return best?.cls;
 }
 
+/**
+ * Groups of a multi-class result for display and export: one per class present among `ids`
+ * (only when at least two classes are present), coloured in class order.
+ */
+export function classGrouping(
+  list: AiDetection[],
+  ids: string[],
+  label: (cls: number) => string,
+  colors: readonly string[],
+): { groups: { id: string; label: string; color: string }[]; byId: Map<string, string> } {
+  const cls = new Map(list.map((d) => [d.id, d.cls]));
+  const by = classGroups(ids.map((id) => ({ id, cls: cls.get(id) })));
+  if (by.size < 2) return { groups: [], byId: new Map() };
+  const order = [...by.keys()].sort((a, b) => a - b);
+  return {
+    groups: order.map((c, k) => ({ id: `dc${c}`, label: label(c), color: colors[k % colors.length]! })),
+    byId: new Map(order.flatMap((c) => by.get(c)!.map((id): [string, string] => [id, `dc${c}`]))),
+  };
+}
+
 /** Ids of classified detections per class index (classes in first-seen order). */
 export function classGroups(list: Pick<AiDetection, 'id' | 'cls'>[]): Map<number, string[]> {
   const m = new Map<number, string[]>();

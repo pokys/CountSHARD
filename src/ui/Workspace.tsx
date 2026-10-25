@@ -34,7 +34,7 @@ import { YOLO_CLASSES, YOLO_SIZE } from '../ai/yolo';
 import {
   asCountedObjects,
   boxesOf,
-  classGroups,
+  classGrouping,
   countedDetections,
   detectionClassAt,
   geco2Boxes,
@@ -620,16 +620,12 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     const none = { groups: [] as SizeGroup[], byId: new Map<string, string>() };
     // Steel profiles: one group per profile type found (when there are at least two types).
     if (detResult?.classes) {
-      const cls = new Map(detResult.objects.map((d) => [d.id, d.cls]));
-      const by = classGroups(counted.map((o) => ({ id: o.id, cls: cls.get(o.id) })));
-      if (by.size < 2) return none;
-      const order = [...by.keys()].sort((a, b) => a - b);
-      const groups: SizeGroup[] = order.map((c, k) => ({
-        id: `dc${c}`,
-        label: t.ai_profiles_classes[c] ?? t.ai_profiles_unknown,
-        color: GROUP_COLORS[k % GROUP_COLORS.length]!,
-      }));
-      return { groups, byId: new Map(order.flatMap((c) => by.get(c)!.map((id): [string, string] => [id, `dc${c}`]))) };
+      return classGrouping(
+        detResult.objects,
+        counted.map((o) => o.id),
+        (c) => t.ai_profiles_classes[c] ?? t.ai_profiles_unknown,
+        GROUP_COLORS,
+      );
     }
     if (counted.length < 2) return none;
     const res = clusterRadii(counted.map((o) => o.r), { mode: 'auto', minSeparation: project.grouping.minSeparation });
@@ -755,6 +751,14 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
     setTool(defaultTool);
   };
   const [viewMenu, setViewMenu] = useState(false);
+  // Caption printed on the saved image; edited here, saved on Enter / leaving the field.
+  const [captionOpen, setCaptionOpen] = useState(false);
+  const [captionDraft, setCaptionDraft] = useState(project.caption ?? '');
+  useEffect(() => setCaptionDraft(project.caption ?? ''), [project.caption]);
+  const saveCaption = () => {
+    const v = captionDraft.trim();
+    if (v !== (project.caption ?? '')) commit((p) => ({ ...p, caption: v || undefined }));
+  };
   const [sheet, setSheet] = useState<'peek' | 'half' | 'full'>('peek');
   const sheetDrag = useRef<{ y: number; moved: boolean } | null>(null);
   const SHEET_ORDER = ['peek', 'half', 'full'] as const;
@@ -1155,6 +1159,37 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                   </button>
                 )}
               </>
+            )}
+            <button
+              className={`btn small${project.caption ? ' on' : ''}`}
+              onClick={() => setCaptionOpen((o) => !o)}
+              aria-expanded={captionOpen}
+              title={t.caption_label}
+              data-testid="quick-caption"
+            >
+              ✎ {t.caption_button}
+            </button>
+            {captionOpen && (
+              <label className="qb-caption">
+                <span className="tiny muted">
+                  {t.caption_label} · {t.caption_hint}
+                </span>
+                <input
+                  value={captionDraft}
+                  maxLength={120}
+                  placeholder={t.caption_placeholder}
+                  onChange={(e) => setCaptionDraft(e.target.value)}
+                  onBlur={saveCaption}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      saveCaption();
+                      setCaptionOpen(false);
+                    }
+                  }}
+                  autoFocus
+                  data-testid="caption-input"
+                />
+              </label>
             )}
             {groupChips && (
               <div className="qb-groups" role="list" aria-label={t.groups_title} data-testid="quick-groups">

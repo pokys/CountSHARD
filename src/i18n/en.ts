@@ -323,8 +323,8 @@ export const en: typeof cs = {
   offline_model_geco2: (size: number, mb: string) => `GeCo2 ${size} px (${mb})`,
   offline_model_delete: 'Delete',
   offline_model_none: 'No AI model downloaded.',
-  legend_det_total: (n: number) => `${n} pcs (AI GeCo2, individual items)`,
-  legend_det_footer: (date: string) => `Created ${date} with CountSHARD. Items found by the GeCo2 model, reviewed by hand.`,
+  legend_det_total: (n: number) => `${n} pcs`,
+  legend_det_footer: (date: string, model: string) => `Created ${date} with CountSHARD. Items found by AI, reviewed by hand. Model: ${model}`,
   ai_det_qb: 'items-ai',
   csv_det: {
     number: 'Number', x: 'Centre X (px)', y: 'Centre Y (px)', w: 'Width (px)', h: 'Height (px)', source: 'Source', review: 'Review', score: 'Model score', model: 'Model', type: 'Type',
@@ -346,6 +346,10 @@ export const en: typeof cs = {
   region_ask: (model: string) => `The model estimates ≈ ${model} here. How many are there really?`,
   save: 'Save',
   // steel-profile model
+  caption_button: 'Caption',
+  caption_label: 'Caption on the image',
+  caption_placeholder: 'e.g. order, warehouse, note',
+  caption_hint: 'Printed as the title of the saved image.',
   ai_model_profiles: 'Steel profiles – pipes, tubes, U, L (no examples)',
   ai_model_profiles_short: 'Steel profiles',
   ai_title_profiles: 'Steel profiles – AI',

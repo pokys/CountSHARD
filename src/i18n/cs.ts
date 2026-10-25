@@ -333,8 +333,8 @@ export const cs = {
   offline_model_geco2: (size: number, mb: string) => `GeCo2 ${size} px (${mb})`,
   offline_model_delete: 'Smazat',
   offline_model_none: 'Žádný AI model není stažen.',
-  legend_det_total: (n: number) => `${n} ks (AI GeCo2, jednotlivé kusy)`,
-  legend_det_footer: (date: string) => `Vytvořeno ${date} v aplikaci CountSHARD. Kusy nalezené modelem GeCo2 s ruční kontrolou.`,
+  legend_det_total: (n: number) => `${n} ks`,
+  legend_det_footer: (date: string, model: string) => `Vytvořeno ${date} v aplikaci CountSHARD. Kusy nalezené AI s ruční kontrolou. Model: ${model}`,
   ai_det_qb: 'kusy-ai',
   csv_det: {
     number: 'Číslo', x: 'X středu (px)', y: 'Y středu (px)', w: 'Šířka (px)', h: 'Výška (px)', source: 'Zdroj', review: 'Kontrola', score: 'Skóre modelu', model: 'Model', type: 'Druh',
@@ -357,6 +357,10 @@ export const cs = {
   region_ask: (model: string) => `Model zde odhaduje ≈ ${model}. Kolik kusů tu skutečně je?`,
   save: 'Uložit',
   // steel-profile model
+  caption_button: 'Popis',
+  caption_label: 'Popis na obrázku',
+  caption_placeholder: 'např. zakázka, sklad, poznámka',
+  caption_hint: 'Vytiskne se jako nadpis uloženého obrázku.',
   ai_model_profiles: 'Ocelové profily – trubky, jekly, U, L (bez vzorů)',
   ai_model_profiles_short: 'Ocelové profily',
   ai_title_profiles: 'Ocelové profily – AI',
