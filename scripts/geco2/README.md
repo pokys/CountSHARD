@@ -1,9 +1,10 @@
 # GeCo2 → ONNX (Mode B, second model)
 
 How the GeCo2 graphs the app downloads were made and measured. The app itself uses
-`src/ai/geco2.ts`, `src/ai/device.ts` and the worker; the files are served from the separate
-Pages site `https://pokys.github.io/geco2-bench/` (its source is `bench-repo/` here, models
-added by `make_bench_inputs.py` + a copy of the `onnx3` exports). Weights and the GeCo2 code are
+`src/ai/geco2.ts`, `src/ai/device.ts` and the worker; the files ship with the app in
+`public/models/geco2/` (copies of the `onnx3` exports). The phone bench page
+`https://pokys.github.io/geco2-bench/` (source `bench-repo/` here, models added by
+`make_bench_inputs.py`) is only a measuring tool. Weights and the GeCo2 code are
 **not** in this folder; run everything in a throw-away Python venv outside the repo.
 
 The shipped graphs are the lean, WebGPU-fixed export (`export_geco2.py` as it is now) at 768
@@ -39,7 +40,7 @@ decoder used for box refinement; GeCo2 loads that from the SAM2 checkpoint at co
 - `geco2-probe.mjs` — memory/speed in onnxruntime-web WASM (Node), like `scripts/ai-mem-probe.mjs`.
 - `bench.html` — the same graphs in the browser (WebGPU / WASM).
 - `make_bench_inputs.py` + `bench-repo/` — the phone test page published as
-  `pokys.github.io/geco2-bench` (also the host of the app's GeCo2 model files).
+  `pokys.github.io/geco2-bench` (the app no longer downloads anything from there).
 - `bench-loca.html` — one LOCA tile on the same bench (GPU-memory comparison).
 - `debug_outputs.py` — exposes intermediate tensors and compares CPU/WebGPU fingerprints
   (`bench.html?debug=backbone|head`); used to find the WebGPU problems.

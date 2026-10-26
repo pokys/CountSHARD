@@ -44,12 +44,15 @@ export function aiAssets(base: string = document.baseURI): AiAsset[] {
 // --- GeCo2 -------------------------------------------------------------------------------
 
 /**
- * GeCo2 files are not in this repository (≈ 80 MB per input size): they are served from the
- * separate GitHub Pages site of the GeCo2 export (CORS allowed), verified by size + SHA-256 and
- * kept in their own cache. Export: scripts/geco2/ (README there).
+ * GeCo2 graphs (≈ 80 MB per input size) are served with the app from models/geco2/, verified
+ * by size + SHA-256 and kept in their own cache. Export: scripts/geco2/ (README there).
  */
-export const GECO2_BASE = 'https://pokys.github.io/geco2-bench/models/';
 export const GECO2_CACHE = 'countshard-geco2-v1';
+/**
+ * Where the graphs were served from before they moved into the app. Files cached from there are
+ * moved to the new URLs (no new download); see migrateGeco2Cache.
+ */
+export const GECO2_LEGACY_BASE = 'https://pokys.github.io/geco2-bench/models/';
 export const GECO2_SIZES: Geco2Size[] = [768, 1024];
 
 export function geco2ModelId(size: Geco2Size): string {
@@ -73,7 +76,7 @@ const GECO2_FILES: Record<Geco2Size, Record<'backbone' | 'exemplars' | 'head', {
 export function geco2Assets(size: Geco2Size, base: string = document.baseURI): AiAsset[] {
   const f = GECO2_FILES[size];
   return [
-    ...(['backbone', 'exemplars', 'head'] as const).map((key) => ({ key, url: `${GECO2_BASE}geco2-${key}-${size}-w8.onnx`, ...f[key] })),
+    ...(['backbone', 'exemplars', 'head'] as const).map((key) => ({ key, url: new URL(`models/geco2/geco2-${key}-${size}-w8.onnx`, base).href, ...f[key] })),
     { key: 'wasm' as const, url: new URL(ortWasmUrl, base).href, bytes: 28312028 },
   ];
 }
@@ -105,8 +108,27 @@ export function totalBytes(assets = aiAssets()): number {
   return assets.reduce((a, b) => a + b.bytes, 0);
 }
 
+/** GeCo2 files cached from the old site are re-keyed to the app's own URLs (same bytes). */
+async function migrateGeco2Cache(base: string = document.baseURI) {
+  if (!(await caches.has(GECO2_CACHE))) return;
+  const cache = await caches.open(GECO2_CACHE);
+  for (const size of GECO2_SIZES)
+    for (const a of geco2Assets(size, base)) {
+      if (a.key === 'wasm') continue;
+      const old = `${GECO2_LEGACY_BASE}${a.url.slice(a.url.lastIndexOf('/') + 1)}`;
+      const r = await cache.match(old);
+      if (!r) continue;
+      if (!(await cache.match(a.url))) await cache.put(a.url, r);
+      await cache.delete(old);
+    }
+}
+
+let migrated: Promise<void> | null = null;
+
 /** Removes caches of earlier model versions (the file URLs stay the same, the content changed). */
 async function dropOldCaches() {
+  migrated ??= migrateGeco2Cache().catch(() => undefined);
+  await migrated;
   for (const k of await caches.keys()) {
     if (
       (k.startsWith('countshard-ai-') && k !== AI_CACHE) ||

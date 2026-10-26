@@ -261,10 +261,11 @@ phones, LOCA otherwise; manual choice of GeCo2 on a slow device shows the expect
   (WebGPU crashed both phones; WASM works). A WebGPU failure is retried once on WASM and the
   device then stays on WASM; a crash (run marker with model + backend) shows a message and an
   "Přepnout na LOCA" button.
-- *Hosting*: the GeCo2 files (≈ 83–87 MB per input size) are not in this repository; the app
-  downloads them from the separate Pages site `pokys.github.io/geco2-bench` (CORS `*`), checks
-  size + SHA-256 and caches them separately. **That repository must stay public and unchanged**
-  while the app uses it (or the URL + hashes in `src/ai/modelStore.ts` move with the files).
+- *Hosting*: the GeCo2 files (≈ 83–87 MB per input size) are plain files in
+  `public/models/geco2/` (not Git LFS: Pages does not serve LFS content), so the app does not
+  depend on another site. Until 2026-10-26 they came from `pokys.github.io/geco2-bench`; files
+  cached from there are re-keyed to the new URLs without a download. The app checks size +
+  SHA-256 and caches them separately.
 - *Results are objects, not an estimate*: numbered boxes, tap removes/adds, counting area,
   undo; re-runs keep the user's edits; exports record the model (CSV every row, JSON
   `summary.detections`, PNG footer). LOCA results stay density estimates; switching models

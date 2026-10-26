@@ -52,8 +52,8 @@ the browser.*
   *Automaticky* (default: chosen per device from WebGPU, memory and a short speed test),
   *LOCA – rychlý odhad* and *GeCo2 – přesnější, jednotlivé kusy*. GeCo2 (≈ 80–90 MB) runs on
   the graphics card on computers (≈ 6 s per photo) and on the processor on phones (iPhone
-  ≈ 16 s, Galaxy A34 ≈ 1 min); its files are served from a separate site
-  (<https://pokys.github.io/geco2-bench/>), not from this repository.
+  ≈ 16 s, Galaxy A34 ≈ 1 min); its files are in `public/models/geco2/` and are downloaded only
+  when GeCo2 is first used.
 
 - **Steel products, mode "Hutní mat." (default for new photos):** no examples needed — a trained
   YOLOv8n detector (model from [IvanFenster/PipesCounting](https://github.com/IvanFenster/PipesCounting),
@@ -125,5 +125,5 @@ mode work from the published link.
 Code: [MIT](LICENSE). Third-party components: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 The AI model files in `public/models/loca/` are derived from non-commercially licensed
 weights (CC BY-NC 4.0) and are **not** covered by the MIT licence. The GeCo2 model files
-(downloaded from a separate site) are not covered by it either; their weights' licence is not
+in `public/models/geco2/` are not covered by it either; their weights' licence is not
 stated by their authors.

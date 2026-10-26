@@ -80,9 +80,10 @@ tests/
    benchmark × calibration) and the device does not report < 3 GB memory. GeCo2 runs on WebGPU
    at 1024 px only on non-mobile devices; phones always use WASM at 768 px (WebGPU crashed both
    test phones).
-2. **Download** (`geco2Assets(size)`): three graphs per input size from
-   `https://pokys.github.io/geco2-bench/models/` (CORS allowed), size + SHA-256 checked, cache
-   `countshard-geco2-v1`. The ORT WASM runtime is shared: found via `caches.match` in either
+2. **Download** (`geco2Assets(size)`): three graphs per input size from the app's own
+   `models/geco2/`, size + SHA-256 checked, cache `countshard-geco2-v1`. Files cached from the
+   former host (`pokys.github.io/geco2-bench/models/`) are re-keyed to the new URLs once, without
+   a new download (`migrateGeco2Cache`). The ORT WASM runtime is shared: found via `caches.match` in either
    model's cache, moved to the other cache before a delete.
 3. **Inference** (`ai.worker.ts` `detect`): photo scaled on the main thread (`geco2Scale`:
    longer side → S, mean exemplar side ≤ 80·S/1024), padded to S × S in the worker; backbone and

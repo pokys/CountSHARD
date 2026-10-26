@@ -26,7 +26,7 @@ import {
 } from '../../src/ai/geco2';
 import { MEAN, STD, resizeRgba } from '../../src/ai/tensor';
 import { AUTO_MAX_SECONDS, type DeviceProfile, geco2Plan, heavyModelWarning, resolveModel, updateMeasured } from '../../src/ai/device';
-import { GECO2_BASE, geco2Assets } from '../../src/ai/modelStore';
+import { geco2Assets } from '../../src/ai/modelStore';
 import { type AiDetection, type AiDetectionResult, type Project, isDensityResult, isDetectionResult } from '../../src/model/types';
 import { createProject, numbering } from '../../src/state/project';
 import { detectionSummary, parseProjectFile, toAiDetectionsCsv, toProjectFile } from '../../src/io/serialize';
@@ -231,12 +231,12 @@ describe('automatic model choice', () => {
 });
 
 describe('GeCo2 model files (download manifest)', () => {
-  it('lists three graphs per input size from the GeCo2 site plus the shared runtime', () => {
+  it('lists three graphs per input size served with the app plus the shared runtime', () => {
     for (const s of [768, 1024] as const) {
       const a = geco2Assets(s, 'https://example.test/app/');
       expect(a.map((x) => x.key)).toEqual(['backbone', 'exemplars', 'head', 'wasm']);
       for (const x of a.slice(0, 3)) {
-        expect(x.url).toBe(`${GECO2_BASE}geco2-${x.key}-${s}-w8.onnx`);
+        expect(x.url).toBe(`https://example.test/app/models/geco2/geco2-${x.key}-${s}-w8.onnx`);
         expect(x.sha256).toMatch(/^[0-9a-f]{64}$/);
         expect(x.bytes).toBeGreaterThan(50000);
       }
