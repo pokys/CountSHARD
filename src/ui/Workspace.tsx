@@ -72,6 +72,22 @@ interface Progress {
 }
 
 /** Resizes the photo to the model scale chosen by the tile plan. */
+/** Plain arrow icon (undo / redo), drawn in the text colour. */
+function Arrow({ dir }: { dir: 'left' | 'right' }) {
+  return (
+    <svg className="arrow-icon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+      <path
+        d={dir === 'left' ? 'M16 10H4M9 5l-5 5 5 5' : 'M4 10h12M11 5l5 5-5 5'}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Longer side of the photo given to the steel-profile model (4 tiles × 640 px at most). */
 const PROFILES_MAX_SIDE = 2560;
 
@@ -978,10 +994,10 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
                 ))}
               </div>
               <button className="icon" onClick={() => setHist(undo)} disabled={!hist.past.length} title={t.undo} aria-label={t.undo}>
-                ↶
+                <Arrow dir="left" />
               </button>
               <button className="icon" onClick={() => setHist(redo)} disabled={!hist.future.length} title={t.redo} aria-label={t.redo}>
-                ↷
+                <Arrow dir="right" />
               </button>
               <button className="icon desktop-only" onClick={() => viewerRef.current?.zoomBy(1.4)} title={t.zoom_in} aria-label={t.zoom_in}>
                 +
@@ -1215,6 +1231,9 @@ export function Workspace({ session, onEngineLoaded, onEngineUnloaded, onError, 
             {totalButton}
             {mode === 'circles' ? (
               <>
+                <button className="btn small primary" disabled={!!progress} onClick={() => void runAnalysis()} title={t.rerun_hint} data-testid="quick-rerun">
+                  {project.analysis ? t.rerun : t.ai_run_detect}
+                </button>
                 {stats.total > 0 && (
                   <button className="btn small" onClick={() => void exportPng()} title={t.export_png} data-testid="quick-png">
                     ⬇ PNG

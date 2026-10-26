@@ -500,6 +500,13 @@ input[type='range'] {
   background: #22c55e;
   color: #052e16;
 }
+.arrow-icon {
+  display: block;
+  margin: auto;
+}
+.icon:disabled .arrow-icon {
+  opacity: 0.35;
+}
 .icon {
   min-width: 40px;
   min-height: 40px;
